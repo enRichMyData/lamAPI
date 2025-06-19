@@ -1,7 +1,8 @@
-from model.elastic import Elastic
-from model.utils import editdistance, clean_str, compute_similarity_between_string
 import datetime
 import json
+
+from model.elastic import Elastic
+from model.utils import clean_str, compute_similarity_between_string, editdistance
 
 
 class LookupRetriever:
@@ -19,12 +20,16 @@ class LookupRetriever:
         types=None,
         kind=None,
         NERtype=None,
+        explicit_types=None,
+        extended_types=None,
         language=None,
         ids=None,
         query=None,
         cache=True,
     ):
-        self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
+        self.candidate_cache_collection = self.database.get_requested_collection(
+            "cache", kg=kg
+        )
         cleaned_name = clean_str(
             name
         )  # Normalize name to ensure lowercase in order to avoid case-sensitive issues in the cache
@@ -36,6 +41,8 @@ class LookupRetriever:
             types=types,
             kind=kind,
             NERtype=NERtype,
+            explicit_types=explicit_types,
+            extended_types=extended_types,
             language=language,
             ids=ids,
             query=query,
@@ -43,29 +50,76 @@ class LookupRetriever:
         )
         return query_result
 
-    def _exec_query(self, cleaned_name, limit, kg, fuzzy, types, kind, NERtype, language, ids, query, cache=True):
-        self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
+    def _exec_query(
+        self,
+        cleaned_name,
+        limit,
+        kg,
+        fuzzy,
+        types,
+        kind,
+        NERtype,
+        explicit_types,
+        extended_types,
+        language,
+        ids,
+        query,
+        cache=True,
+    ):
+        self.candidate_cache_collection = self.database.get_requested_collection(
+            "cache", kg=kg
+        )
 
         ntoken_mention = len(cleaned_name.split(" "))
         length_mention = len(cleaned_name)
-        ambiguity_mention, corrects_tokens = self._get_ambiguity_mention(cleaned_name, kg, limit)
+        ambiguity_mention, corrects_tokens = self._get_ambiguity_mention(
+            cleaned_name, kg, limit
+        )
 
         if query is not None:
             query = json.loads(query)
             result = self.elastic_retriever.search(query, kg, limit)
             result = self._get_final_candidates_list(
-                result, cleaned_name, kg, ambiguity_mention, corrects_tokens, ntoken_mention, length_mention
+                result,
+                cleaned_name,
+                kg,
+                ambiguity_mention,
+                corrects_tokens,
+                ntoken_mention,
+                length_mention,
             )
             return result
 
         if not cache:
-            query = self.create_query(cleaned_name, fuzzy=fuzzy, types=types, kind=kind, NERtype=NERtype, language=language)
+            query = self.create_query(
+                cleaned_name,
+                fuzzy=fuzzy,
+                types=types,
+                kind=kind,
+                NERtype=NERtype,
+                explicit_types=explicit_types,
+                extended_types=extended_types,
+                language=language,
+            )
             result = self.elastic_retriever.search(query, kg, limit)
             final_result = self._get_final_candidates_list(
-                result, cleaned_name, kg, ambiguity_mention, corrects_tokens, ntoken_mention, length_mention
+                result,
+                cleaned_name,
+                kg,
+                ambiguity_mention,
+                corrects_tokens,
+                ntoken_mention,
+                length_mention,
             )
             final_result = self._check_ids(
-                cleaned_name, kg, ids, ntoken_mention, length_mention, ambiguity_mention, corrects_tokens, final_result
+                cleaned_name,
+                kg,
+                ids,
+                ntoken_mention,
+                length_mention,
+                ambiguity_mention,
+                corrects_tokens,
+                final_result,
             )
             return final_result
 
@@ -82,34 +136,66 @@ class LookupRetriever:
             "fuzzy": fuzzy,
             "types": types,
             "kind": kind,
-            "NERtype": NERtype,
+            "NERtype": NERtype,            
+            "explicit_types": explicit_types,
+            "extended_types": extended_types,
             "language": language,
         }
 
         result = self.candidate_cache_collection.find_one_and_update(
-            body, {"$set": {"lastAccessed": datetime.datetime.now(datetime.timezone.utc)}}
+            body,
+            {"$set": {"lastAccessed": datetime.datetime.now(datetime.timezone.utc)}},
         )
 
         if result is not None:
             final_result = result["candidates"][0:limit]
-            limit = result["limit"] 
+            limit = result["limit"]
             result = self._check_ids(
-                cleaned_name, kg, ids, ntoken_mention, length_mention, ambiguity_mention, corrects_tokens, final_result
+                cleaned_name,
+                kg,
+                ids,
+                ntoken_mention,
+                length_mention,
+                ambiguity_mention,
+                corrects_tokens,
+                final_result,
             )
             if result is not None:
                 final_result = result
                 self.add_or_update_cache(body, final_result, limit)
             return final_result
 
-        query = self.create_query(cleaned_name, fuzzy=fuzzy, types=types, kind=kind, NERtype=NERtype, language=language)
+        query = self.create_query(
+            cleaned_name,
+            fuzzy=fuzzy,
+            types=types,
+            kind=kind,
+            NERtype=NERtype,
+            explicit_types=explicit_types,
+            extended_types=extended_types,
+            language=language,
+        )
         final_result = []
 
         result = self.elastic_retriever.search(query, kg, limit)
         final_result = self._get_final_candidates_list(
-            result, cleaned_name, kg, ambiguity_mention, corrects_tokens, ntoken_mention, length_mention
+            result,
+            cleaned_name,
+            kg,
+            ambiguity_mention,
+            corrects_tokens,
+            ntoken_mention,
+            length_mention,
         )
         final_result = self._check_ids(
-            cleaned_name, kg, ids, ntoken_mention, length_mention, ambiguity_mention, corrects_tokens, final_result
+            cleaned_name,
+            kg,
+            ids,
+            ntoken_mention,
+            length_mention,
+            ambiguity_mention,
+            corrects_tokens,
+            final_result,
         )
         self.add_or_update_cache(body, final_result, limit)
 
@@ -129,38 +215,52 @@ class LookupRetriever:
                 ambiguity_mention += 1
             history_labels.add(entity["id"])
         tokens_mention = set(cleaned_name.split(" "))
-        ambiguity_mention = ambiguity_mention / len(history_labels) if len(history_labels) > 0 else 0
+        ambiguity_mention = (
+            ambiguity_mention / len(history_labels) if len(history_labels) > 0 else 0
+        )
         ambiguity_mention = round(ambiguity_mention, 3)
-        corrects_tokens = round(len(tokens_mention.intersection(tokens_set)) / len(tokens_mention), 3)
+        corrects_tokens = round(
+            len(tokens_mention.intersection(tokens_set)) / len(tokens_mention), 3
+        )
         return ambiguity_mention, corrects_tokens
 
     def _get_final_candidates_list(
-        self, result, name, kg, ambiguity_mention, corrects_tokens, ntoken_mention, length_mention
+        self,
+        result,
+        name,
+        kg,
+        ambiguity_mention,
+        corrects_tokens,
+        ntoken_mention,
+        length_mention,
     ):
-        
         ids = list(set([t for entity in result for t in entity["types"].split(" ")]))
-        types_id_to_name = self._get_types_id_to_name(ids, kg)    
+        types_id_to_name = self._get_types_id_to_name(ids, kg)
 
         history = {}
         for entity in result:
+
             id_entity = entity["id"]
             label_clean = clean_str(entity["name"])
             ed_score = round(editdistance(label_clean, name), 2)
-            jaccard_score = round(compute_similarity_between_string(label_clean, name), 2)
-            jaccard_ngram_score = round(compute_similarity_between_string(label_clean, name, 3), 2)
-            if len(entity["types"]) == 0:
-                types = []
-            else:
-                types = [
-                    {"id": id_type, "name": types_id_to_name.get(id_type, id_type)} for id_type in entity["types"].split(" ")
-                ]
+            jaccard_score = round(
+                compute_similarity_between_string(label_clean, name), 2
+            )
+            jaccard_ngram_score = round(
+                compute_similarity_between_string(label_clean, name, 3), 2
+            )
             obj = {
                 "id": entity["id"],
                 "name": entity["name"],
                 "description": entity.get("description", ""),
-                "types": types,
+                "types": [
+                    {"id": id_type, "name": types_id_to_name.get(id_type, id_type)}
+                    for id_type in entity["types"].split(" ")
+                ],
                 "kind": entity.get("kind", None),
                 "NERtype": entity.get("NERtype", None),
+                "explicit_types": entity.get("explicit_types", None),
+                "extended_types": entity.get("extended_types", None),
                 "ambiguity_mention": ambiguity_mention,
                 "corrects_tokens": corrects_tokens,
                 "ntoken_mention": ntoken_mention,
@@ -174,9 +274,12 @@ class LookupRetriever:
                 "jaccard_score": jaccard_score,
                 "jaccardNgram_score": jaccard_ngram_score,
             }
+
             if id_entity not in history:
                 history[id_entity] = obj
-            elif (ed_score + jaccard_score) > (history[id_entity]["ed_score"] + history[id_entity]["jaccard_score"]):
+            elif (ed_score + jaccard_score) > (
+                history[id_entity]["ed_score"] + history[id_entity]["jaccard_score"]
+            ):
                 history[id_entity] = obj
 
         return list(history.values())
@@ -197,11 +300,16 @@ class LookupRetriever:
             "types": body.get("types"),
             "kind": body.get("kind"),
             "NERtype": body.get("NERtype"),
+            "explicit_types": body.get("explicit_types"),
+            "extended_types": body.get("extended_types"),
             "language": body.get("language"),
         }
 
         update = {
-            "$set": {"candidates": final_result, "lastAccessed": datetime.datetime.now(datetime.timezone.utc)},
+            "$set": {
+                "candidates": final_result,
+                "lastAccessed": datetime.datetime.now(datetime.timezone.utc),
+            },
             "$setOnInsert": query,
         }
 
@@ -210,13 +318,23 @@ class LookupRetriever:
         except Exception as e:
             print(f"Error inserting or updating in cache: {e}")
 
-    def _check_ids(self, name, kg, ids, ntoken_mention, length_mention, ambiguity_mention, corrects_tokens, result):
+    def _check_ids(
+        self,
+        name,
+        kg,
+        ids,
+        ntoken_mention,
+        length_mention,
+        ambiguity_mention,
+        corrects_tokens,
+        result,
+    ):
         if ids is None:
             return result
 
         result = result or []
         ids_list = ids.split(" ")
-       
+
         for item in result:
             if item["id"] in ids_list:
                 ids_list.remove(item["id"])
@@ -224,11 +342,17 @@ class LookupRetriever:
         if len(ids_list) == 0:
             return result
 
-        ids = " ".join(ids_list)        
+        ids = " ".join(ids_list)
         query = self.create_ids_query(ids)
         result_by_id = self.elastic_retriever.search(query, kg)
         result_by_id = self._get_final_candidates_list(
-            result_by_id, name, kg, ambiguity_mention, corrects_tokens, ntoken_mention, length_mention
+            result_by_id,
+            name,
+            kg,
+            ambiguity_mention,
+            corrects_tokens,
+            ntoken_mention,
+            length_mention,
         )
         new_result = result + result_by_id
         return new_result
@@ -236,11 +360,16 @@ class LookupRetriever:
     def _get_types_id_to_name(self, ids, kg):
         items_collection = self.database.get_requested_collection("items", kg=kg)
         results = items_collection.find({"kind": "type", "entity": {"$in": ids}})
-        types_id_to_name = {result["entity"]: result["labels"].get("en") for result in results}
+        types_id_to_name = {
+            result["entity"]: result["labels"].get("en") for result in results
+        }
         return types_id_to_name
 
     def create_token_query(self, name):
-        query = {"query": {"match": {"name": name}}, "_source": {"excludes": ["language"]}}
+        query = {
+            "query": {"match": {"name": name}},
+            "_source": {"excludes": ["language"]},
+        }
         return query
 
     # Create a query to search for a list of ids (string separated by space)
@@ -249,27 +378,36 @@ class LookupRetriever:
         query = {
             "query": {
                 "bool": {
-                    "must": [{"match": {"id": ids}}, {"match": {"language": "en"}}, {"match": {"is_alias": False}}]
+                    "must": [
+                        {"match": {"id": ids}},
+                        {"match": {"language": "en"}},
+                        {"match": {"is_alias": False}},
+                    ]
                 }
             },
-            "_source": {
-                "excludes": ["language"]
-            }
+            "_source": {"excludes": ["language"]},
         }
         return query
 
-    def create_query(self, name, fuzzy=False, types=None, kind=None, NERtype=None, language=None):
+    def create_query(
+        self, name, fuzzy=False, types=None, kind=None, NERtype=None, explicit_types=None, extended_types=None, language=None
+    ):
         # Base query
         query_base = {
-            "query": {"bool": {"must": [], "filter": []}}, "sort": [{"popularity": {"order": "desc"}}],
-            "_source": {"excludes": ["language"]}
+            "query": {"bool": {"must": [], "should": [], "filter": []}},
+            "sort": [{"popularity": {"order": "desc"}}],
+            "_source": {"excludes": ["language"]},
         }
 
         # Add name to the query
         if fuzzy:
-            query_base["query"]["bool"]["must"].append({"match": {"name": {"query": name, "fuzziness": "auto"}}})
+            query_base["query"]["bool"]["must"].append(
+                {"match": {"name": {"query": name, "fuzziness": "auto"}}}
+            )
         else:
-            query_base["query"]["bool"]["must"].append({"match": {"name": {"query": name, "boost": 2}}})
+            query_base["query"]["bool"]["must"].append(
+                {"match": {"name": {"query": name, "boost": 2}}}
+            )
 
         # Add types filter if provided
         if types:
@@ -279,12 +417,77 @@ class LookupRetriever:
         if kind:
             query_base["query"]["bool"]["filter"].append({"term": {"kind": kind}})
 
-        # Add NERtype filter if provided
+
+
+############################################################################################
+## overlap between Q and T_i: retrieves only entities with same name and Q included in T_i
+############################################################################################
         if NERtype:
-            query_base["query"]["bool"]["filter"].append({"term": {"NERtype": NERtype}})
+            query_base["query"]["bool"]["must"].append(
+                {"terms": {"NERtype": [NERtype]}})
+            
+        '''   
+        should_clause = []
+        if NERtype:
+            if isinstance(NERtype, list):
+                should_clause = [{"term": {"NERtype": NERtype}}]
+            else:
+                should_clause = [{"term": {"NERtype": NERtype}}]
+
+         query_base["query"]["bool"]["should"].append(should_clause)
+        '''
+
+############################################################################################
+############################################################################################
+
+        if explicit_types:
+            query_base["query"]["bool"]["must"].append({
+                "terms": {
+                    "explicit_types": [explicit_types]
+                }
+            })
+            
+        '''   
+        should_clause = []
+        if explicit_types:
+            if isinstance(explicit_types, list):
+                should_clause = [{"term": {"explicit_types": explicit_types}}]
+            else:
+                should_clause = [{"term": {"explicit_types": explicit_types}}]
+
+         query_base["query"]["bool"]["should"].append(should_clause)
+        '''
+
+############################################################################################
+############################################################################################
+        if extended_types:
+            query_base["query"]["bool"]["must"].append({
+                "terms": {
+                    "extended_types": [extended_types]
+                }
+            })
+            
+        '''   
+        should_clause = []
+        if extended_types:
+            if isinstance(extended_types, list):
+                should_clause = [{"term": {"extended_types": extended_types}}]
+            else:
+                should_clause = [{"term": {"extended_types": extended_types}}]
+
+         query_base["query"]["bool"]["should"].append(should_clause)
+        '''
+
+############################################################################################
+############################################################################################
+
+
 
         # Add language filter if provided
         if language:
-            query_base["query"]["bool"]["filter"].append({"term": {"language": language}})
+            query_base["query"]["bool"]["filter"].append(
+                {"term": {"language": language}}
+            )
 
         return query_base
+
