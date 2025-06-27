@@ -60,7 +60,7 @@ import sqlite3
 import sys
 import threading
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 
 import aiohttp
 import backoff
@@ -101,8 +101,8 @@ class Processor:
         parser: "WikidataParser",
         reader_threads=1,
         processor_threads=8,
-        block_size=4 * 1024 * 1024,
-        writer_batch_size=2048,
+        block_size=6 * 1024 * 1024,
+        writer_batch_size=8192,
     ):
         if reader_threads != 1:
             raise ValueError("reader_threads must be 1 for sequential input")
@@ -288,6 +288,11 @@ class Processor:
         connection = None
         if types_db_path:
             connection = sqlite3.connect(types_db_path)
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
+            connection.execute("PRAGMA cache_size = 10000")
+            connection.execute("PRAGMA temp_store = MEMORY")
+            connection.execute("PRAGMA mmap_size = 268435456")  # 256MB
             print(f"Worker {worker_id}: Connected to types database")
 
         try:
@@ -617,8 +622,8 @@ class WikidataParser:
     """Main Wikidata parser class that handles all processing logic"""
 
     def __init__(self):
-        self.ENTITY_CACHE_SIZE = 50000
-        self.skip_existing = True
+        self.ENTITY_CACHE_SIZE = 65536
+        self.skip_existing = False
 
         # MongoDB setup
         self._setup_mongodb()
@@ -792,14 +797,14 @@ class WikidataParser:
         entities_set = set(entities)
         cached_types = self.types_cache_c.find(
             {"entity": {"$in": list(entities_set)}},
-            {"_id": 0, "entity": 1, "extended_WDtypes": 1},
+            {"_id": 0, "entity": 1, "extended_types": 1},
         )
 
         cached_result = {}
         cached_entities = set()
         for doc in cached_types:
             entity = doc["entity"]
-            cached_result[entity] = set(doc.get("extended_WDtypes", []))
+            cached_result[entity] = set(doc.get("extended_types", []))
             cached_entities.add(entity)
 
         # If all entities are cached, return immediately
@@ -808,27 +813,24 @@ class WikidataParser:
 
         # Only compute missing entities
         missing_entities = entities_set - cached_entities
-        missing_results = {}
         if missing_entities:
             if connection is None:
-                for entity in missing_entities:
-                    missing_result = self.transitive_closure_from_sparql([entity])
-                    cached_result.update(missing_result)
-                    missing_results.update(missing_result)
+                missing_results = self.transitive_closure_from_sparql(missing_entities)
+                cached_result.update(missing_results)
             else:
-                for entity in missing_entities:
-                    missing_result = self.transitive_closure_from_db(
-                        connection, [entity]
-                    )
-                    cached_result.update(missing_result)
-                    missing_results.update(missing_result)
+                missing_results = self.transitive_closure_from_db(
+                    connection, missing_entities
+                )
+                cached_result.update(missing_results)
 
             # Cache the missing results in database (async to avoid blocking)
             if missing_results:
                 try:
                     docs = []
                     for entity, types in missing_results.items():
-                        docs.append({"entity": entity, "extended_WDtypes": list(types)})
+                        docs.append(
+                            {"entity": entity, "extended_types": list(set(types))}
+                        )
                     if docs:
                         self.types_cache_c.insert_many(docs, ordered=False)
                 except Exception as e:
@@ -836,46 +838,51 @@ class WikidataParser:
 
         return cached_result
 
-    def transitive_closure_from_db(self, connection, items):
-        """Get transitive closure from SQLite database"""
+    def transitive_closure_from_db(self, connection, items, closure_table=True):
+        """Get transitive closure from SQLite database,
+        using a pre-materialized closure table if available."""
+        if not items:
+            return {}
         cur = connection.cursor()
         vals = ",".join(f"('{item}')" for item in items)
 
-        query = f"""
-            WITH RECURSIVE
-            items(item) AS (
-                VALUES {vals}
-            ),
-            initial(item, sup) AS (
-                -- only direct subclass_of edges for each seed
-                SELECT s.subclass, s.superclass
-                FROM subclass AS s
-                JOIN items     AS its ON s.subclass = its.item
-            ),
-            closure(item, sup) AS (
-                -- walk up the P279 chain
-                SELECT item, sup FROM initial
-                UNION
-                SELECT c.item, s.superclass
-                FROM closure AS c
-                JOIN subclass AS s
-                    ON c.sup = s.subclass
-            )
-            SELECT DISTINCT
-            item,
-            sup     AS superclass
-            FROM closure
-            ORDER BY item, superclass;
-        """
-
+        if closure_table:
+            # 1) Check if the fast lookup table exists
+            query = f"""
+                SELECT subclass, superclass
+                FROM subclass_closure
+                WHERE subclass IN ({vals})
+            """
+        else:
+            # 2) Fallback: recursive‐CTE
+            query = f"""
+                WITH RECURSIVE
+                items(item) AS (
+                    VALUES {vals}
+                ),
+                initial(item, sup) AS (
+                    SELECT s.subclass, s.superclass
+                    FROM subclass AS s
+                    JOIN items     AS its ON s.subclass = its.item
+                ),
+                closure(item, sup) AS (
+                    SELECT item, sup FROM initial
+                    UNION
+                    SELECT c.item, s.superclass
+                    FROM closure AS c
+                    JOIN subclass AS s
+                        ON c.sup = s.subclass
+                )
+                SELECT DISTINCT
+                    item,
+                    sup     AS superclass
+                FROM closure
+            """
         cur.execute(query)
-        results = cur.fetchall()
-        out = {}
-        for item, superclass in results:
-            if item not in out:
-                out[item] = set()
+        out = defaultdict(set)
+        for item, superclass in cur.fetchall():
             out[item].add(superclass)
-        return out
+        return {item: out.get(item, set()) for item in items}
 
     def transitive_closure_from_sparql(self, items) -> dict[str, set[str]]:
         entity_ids = set(items)
@@ -984,6 +991,7 @@ class WikidataParser:
         NERtype = set()
         explicit_types = set()
         extended_types = set()
+        types = {"P31": [], "P279": []}
 
         if item.get("type") == "item" and "claims" in item:
             types_claims = item["claims"].get("P31", [])
@@ -993,21 +1001,28 @@ class WikidataParser:
                 for claim in types_claims:
                     mainsnak = claim.get("mainsnak", {})
                     datavalue = mainsnak.get("datavalue", {})
-                    numeric_id = datavalue.get("value", {}).get("numeric-id")
+                    claim_qid = datavalue.get("value", {}).get("id", None)
 
-                    if numeric_id is not None:
-                        explicit_types.add("Q" + str(numeric_id))
-                        if numeric_id == 5:
+                    if claim_qid is not None:
+                        explicit_types.add(claim_qid)
+                        if claim_qid == 5:
                             NERtype.add("PERS")
-                        elif numeric_id in geolocation_subclass:
+                        elif claim_qid in geolocation_subclass:
                             NERtype.add("LOC")
-                        elif numeric_id in organization_subclass:
+                        elif claim_qid in organization_subclass:
                             NERtype.add("ORG")
                         else:
                             NERtype.add("OTHERS")
+                    if mainsnak.get("property") == "P31":
+                        types["P31"].append(claim_qid)
+                    elif mainsnak.get("property") == "P279":
+                        types["P279"].append(claim_qid)
 
-        extended_types.update(self.transitive_closure(explicit_types, connection))
-        extended_types.update(explicit_types)
+        for explicit_type, retrieved_superclasses in self.transitive_closure(
+            explicit_types, connection
+        ).items():
+            extended_types.update(retrieved_superclasses)
+            extended_types.update([explicit_type])
 
         # URL EXTRACTION
         url_dict = {}
@@ -1039,7 +1054,6 @@ class WikidataParser:
         # Process claims and build data structures
         objects = {}
         literals = {datatype: {} for datatype in self.DATATYPES}
-        types = {"P31": []}
 
         predicates = item["claims"]
         for predicate in predicates:
@@ -1053,8 +1067,6 @@ class WikidataParser:
                     if datatype == "wikibase-item" or datatype == "wikibase-property":
                         if "datavalue" in obj["mainsnak"]:
                             value = obj["mainsnak"]["datavalue"]["value"]["id"]
-                            if predicate == "P31":
-                                types["P31"].append(value)
                             if value not in objects:
                                 objects[value] = []
                             objects[value].append(predicate)
@@ -1093,7 +1105,7 @@ class WikidataParser:
     def parse_wikidata_dump(
         self,
         input_source,
-        skip_existing=True,
+        skip_existing=False,
         types_db_path=None,
         threads=None,
         stdin_json=False,
@@ -1193,7 +1205,7 @@ class WikidataParser:
             self,
             reader_threads=1,
             processor_threads=threads,
-            block_size=1 * 1024 * 1024,
+            block_size=4 * 1024 * 1024,
             writer_batch_size=8192,
         )
 
