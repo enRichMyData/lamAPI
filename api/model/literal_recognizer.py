@@ -2,7 +2,6 @@ import re
 
 
 class LiteralRecognizer:
-
     # PATTERN TO MATCH DATES
     # dates like: '145 bc', '145.bc', '145,bc'
     # dates like: '1997-08-26', '1997.08.26', '1997/08/26'
@@ -46,7 +45,9 @@ class LiteralRecognizer:
     EMAIL_PATTERN = r"^\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b$"
 
     # PATTERN TO MATCH DATETIME
-    DATETIME_PATTERN = r"^\d{4}[-.\/]\d{1,2}[-.\/]\d{1,2}T(24:00|2[0-3]:[0-5][0-9]|[0-1][0-9]:[0-5][0-9])$"
+    DATETIME_PATTERN = (
+        r"^\d{4}[-.\/]\d{1,2}[-.\/]\d{1,2}T(24:00|2[0-3]:[0-5][0-9]|[0-1][0-9]:[0-5][0-9])$"
+    )
 
     # PATTERN TO MATCH TIME
     TIME_PATTERN = r"^(24:00|2[0-3]:[0-5][0-9]|[0-1][0-9]:[0-5][0-9])$"

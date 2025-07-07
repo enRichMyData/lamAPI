@@ -12,7 +12,9 @@ def editdistance(s1, s2):
 def recognize_entity(entity):
     wikidata_pattern_obj = r"^Q\d+$"
     wikidata_pattern_pred = r"^P\d+$"
-    if re.compile(wikidata_pattern_obj).search(entity) or re.compile(wikidata_pattern_pred).search(entity):
+    if re.compile(wikidata_pattern_obj).search(entity) or re.compile(wikidata_pattern_pred).search(
+        entity
+    ):
         return "wikidata"
     else:
         return "dbpedia"
@@ -72,6 +74,14 @@ def create_index(db):
     for kg in db.mappings:
         candidate_cache_collection = db.get_requested_collection("candidate", kg=kg)
         candidate_cache_collection.create_index(
-            [("cell", 1), ("fuzzy", 1), ("ngrams", 1), ("type", 1), ("description", 1), ("kg", 1), ("limit", 1)],
+            [
+                ("cell", 1),
+                ("fuzzy", 1),
+                ("ngrams", 1),
+                ("type", 1),
+                ("description", 1),
+                ("kg", 1),
+                ("limit", 1),
+            ],
             unique=True,
         )

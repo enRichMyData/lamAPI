@@ -26,9 +26,7 @@ client = get_mongo_client()
 
 
 def fetch_predicate_labels(predicate_ids, collection):
-    predicates = collection.find(
-        {"entity": {"$in": predicate_ids}}, {"entity": 1, "labels.en": 1}
-    )
+    predicates = collection.find({"entity": {"$in": predicate_ids}}, {"entity": 1, "labels.en": 1})
     predicate_labels = {
         predicate["entity"]: predicate.get("labels", {}).get("en", "Unknown Label")
         for predicate in predicates
@@ -99,9 +97,7 @@ def enhance_and_store_results(
             )
 
         if len(buffer) == batch_size:
-            predicate_labels = fetch_predicate_labels(
-                id_predicates, db[label_resolver_collection]
-            )
+            predicate_labels = fetch_predicate_labels(id_predicates, db[label_resolver_collection])
             for i, item in enumerate(buffer):
                 item["label"] = predicate_labels.get(id_predicates[i], "Unknown Label")
             summary_collection = db[summary_collection_name]
@@ -110,9 +106,7 @@ def enhance_and_store_results(
             id_predicates = []
 
     if len(buffer) > 0:
-        predicate_labels = fetch_predicate_labels(
-            id_predicates, db[label_resolver_collection]
-        )
+        predicate_labels = fetch_predicate_labels(id_predicates, db[label_resolver_collection])
         for i, item in enumerate(buffer):
             item["label"] = predicate_labels.get(id_predicates[i], "Unknown Label")
         summary_collection = db[summary_collection_name]
@@ -132,9 +126,7 @@ def main(db_name):
         {"$group": {"_id": "$relationPairs.v", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    enhance_and_store_results(
-        db_name, "objects", "objectsSummary", pipeline_objects, "items"
-    )
+    enhance_and_store_results(db_name, "objects", "objectsSummary", pipeline_objects, "items")
 
     end_time_objects = time.time()
     print(f"Time taken for objects: {end_time_objects - start_time_objects} seconds")
@@ -162,9 +154,7 @@ def main(db_name):
         },
         {"$sort": {"count": -1}},
     ]
-    enhance_and_store_results(
-        db_name, "literals", "literalsSummary", pipeline_literals, "items"
-    )
+    enhance_and_store_results(db_name, "literals", "literalsSummary", pipeline_literals, "items")
 
     end_time_literals = time.time()
     print(f"Time taken for literals: {end_time_literals - start_time_literals} seconds")

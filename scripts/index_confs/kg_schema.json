@@ -38,7 +38,7 @@
             "kind": {
                 "type": "keyword"
             },
-            
+
 
             "NERtype": {
                 "type": "keyword"

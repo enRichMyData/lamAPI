@@ -12,7 +12,6 @@ SUPPORTED_KGS = SUPPORTED_KGS.split(",")
 
 
 class Database:
-
     def __init__(self):
         self.mongo = MongoClient(
             MONGO_ENDPOINT,

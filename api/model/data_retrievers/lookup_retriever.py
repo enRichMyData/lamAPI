@@ -6,7 +6,6 @@ from model.utils import clean_str, compute_similarity_between_string, editdistan
 
 
 class LookupRetriever:
-
     def __init__(self, database):
         self.database = database
         self.elastic_retriever = Elastic()
@@ -27,9 +26,7 @@ class LookupRetriever:
         query=None,
         cache=True,
     ):
-        self.candidate_cache_collection = self.database.get_requested_collection(
-            "cache", kg=kg
-        )
+        self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
         cleaned_name = clean_str(
             name
         )  # Normalize name to ensure lowercase in order to avoid case-sensitive issues in the cache
@@ -66,15 +63,11 @@ class LookupRetriever:
         query,
         cache=True,
     ):
-        self.candidate_cache_collection = self.database.get_requested_collection(
-            "cache", kg=kg
-        )
+        self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
 
         ntoken_mention = len(cleaned_name.split(" "))
         length_mention = len(cleaned_name)
-        ambiguity_mention, corrects_tokens = self._get_ambiguity_mention(
-            cleaned_name, kg, limit
-        )
+        ambiguity_mention, corrects_tokens = self._get_ambiguity_mention(cleaned_name, kg, limit)
 
         if query is not None:
             query = json.loads(query)
@@ -136,7 +129,7 @@ class LookupRetriever:
             "fuzzy": fuzzy,
             "types": types,
             "kind": kind,
-            "NERtype": NERtype,            
+            "NERtype": NERtype,
             "explicit_types": explicit_types,
             "extended_types": extended_types,
             "language": language,
@@ -239,16 +232,11 @@ class LookupRetriever:
 
         history = {}
         for entity in result:
-
             id_entity = entity["id"]
             label_clean = clean_str(entity["name"])
             ed_score = round(editdistance(label_clean, name), 2)
-            jaccard_score = round(
-                compute_similarity_between_string(label_clean, name), 2
-            )
-            jaccard_ngram_score = round(
-                compute_similarity_between_string(label_clean, name, 3), 2
-            )
+            jaccard_score = round(compute_similarity_between_string(label_clean, name), 2)
+            jaccard_ngram_score = round(compute_similarity_between_string(label_clean, name, 3), 2)
             obj = {
                 "id": entity["id"],
                 "name": entity["name"],
@@ -360,9 +348,7 @@ class LookupRetriever:
     def _get_types_id_to_name(self, ids, kg):
         items_collection = self.database.get_requested_collection("items", kg=kg)
         results = items_collection.find({"kind": "type", "entity": {"$in": ids}})
-        types_id_to_name = {
-            result["entity"]: result["labels"].get("en") for result in results
-        }
+        types_id_to_name = {result["entity"]: result["labels"].get("en") for result in results}
         return types_id_to_name
 
     def create_token_query(self, name):
@@ -390,7 +376,15 @@ class LookupRetriever:
         return query
 
     def create_query(
-        self, name, fuzzy=False, types=None, kind=None, NERtype=None, explicit_types=None, extended_types=None, language=None
+        self,
+        name,
+        fuzzy=False,
+        types=None,
+        kind=None,
+        NERtype=None,
+        explicit_types=None,
+        extended_types=None,
+        language=None,
     ):
         # Base query
         query_base = {
@@ -417,16 +411,13 @@ class LookupRetriever:
         if kind:
             query_base["query"]["bool"]["filter"].append({"term": {"kind": kind}})
 
-
-
-############################################################################################
-## overlap between Q and T_i: retrieves only entities with same name and Q included in T_i
-############################################################################################
+        ############################################################################################
+        ## overlap between Q and T_i: retrieves only entities with same name and Q included in T_i
+        ############################################################################################
         if NERtype:
-            query_base["query"]["bool"]["must"].append(
-                {"terms": {"NERtype": [NERtype]}})
-            
-        '''   
+            query_base["query"]["bool"]["must"].append({"terms": {"NERtype": [NERtype]}})
+
+        """
         should_clause = []
         if NERtype:
             if isinstance(NERtype, list):
@@ -435,19 +426,17 @@ class LookupRetriever:
                 should_clause = [{"term": {"NERtype": NERtype}}]
 
          query_base["query"]["bool"]["should"].append(should_clause)
-        '''
+        """
 
-############################################################################################
-############################################################################################
+        ############################################################################################
+        ############################################################################################
 
         if explicit_types:
-            query_base["query"]["bool"]["must"].append({
-                "terms": {
-                    "explicit_types": [explicit_types]
-                }
-            })
-            
-        '''   
+            query_base["query"]["bool"]["must"].append(
+                {"terms": {"explicit_types": [explicit_types]}}
+            )
+
+        """
         should_clause = []
         if explicit_types:
             if isinstance(explicit_types, list):
@@ -456,18 +445,16 @@ class LookupRetriever:
                 should_clause = [{"term": {"explicit_types": explicit_types}}]
 
          query_base["query"]["bool"]["should"].append(should_clause)
-        '''
+        """
 
-############################################################################################
-############################################################################################
+        ############################################################################################
+        ############################################################################################
         if extended_types:
-            query_base["query"]["bool"]["must"].append({
-                "terms": {
-                    "extended_types": [extended_types]
-                }
-            })
-            
-        '''   
+            query_base["query"]["bool"]["must"].append(
+                {"terms": {"extended_types": [extended_types]}}
+            )
+
+        """
         should_clause = []
         if extended_types:
             if isinstance(extended_types, list):
@@ -476,18 +463,13 @@ class LookupRetriever:
                 should_clause = [{"term": {"extended_types": extended_types}}]
 
          query_base["query"]["bool"]["should"].append(should_clause)
-        '''
+        """
 
-############################################################################################
-############################################################################################
-
-
+        ############################################################################################
+        ############################################################################################
 
         # Add language filter if provided
         if language:
-            query_base["query"]["bool"]["filter"].append(
-                {"term": {"language": language}}
-            )
+            query_base["query"]["bool"]["filter"].append({"term": {"language": language}})
 
         return query_base
-

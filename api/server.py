@@ -1,10 +1,10 @@
-import traceback
 import logging
 import traceback
 
 from flask import Flask, request
 from flask_cors import CORS
 from flask_restx import Api, Resource, fields, reqparse
+from model.data_retrievers.bow_retriever import BOWRetriever
 from model.data_retrievers.column_analysis import ColumnAnalysis
 from model.data_retrievers.labels_retriever import LabelsRetriever
 from model.data_retrievers.literal_classifier import LiteralClassifier
@@ -12,7 +12,6 @@ from model.data_retrievers.literals_retriever import LiteralsRetriever
 from model.data_retrievers.lookup_retriever import LookupRetriever
 from model.data_retrievers.ner_recognizer import NERRecognizer
 from model.data_retrievers.objects_retriever import ObjectsRetriever
-from model.data_retrievers.bow_retriever import BOWRetriever
 from model.data_retrievers.predicates_retriever import PredicatesRetriever
 from model.data_retrievers.sameas_retriever import SameasRetriever
 from model.data_retrievers.summary_retriever import SummaryRetriever
@@ -122,17 +121,13 @@ fields_bow = info.model(
     },
 )
 
-fields_sameas = info.model(
-    "SameAS", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
-)
+fields_sameas = info.model("SameAS", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
 fields_literals = info.model(
     "Literals", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
 )
 
-fields_types = info.model(
-    "Concepts", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
-)
+fields_types = info.model("Concepts", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
 fields_literal_recognizer = info.model(
     "LiteralRecognizer",
@@ -150,9 +145,7 @@ fields_literal_recognizer = info.model(
     },
 )
 
-fields_labels = info.model(
-    "Labels", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
-)
+fields_labels = info.model("Labels", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
 fields_rdf2vec = info.model(
     "RDF2Vec", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
@@ -196,11 +189,7 @@ fields_ner = info.model(
 
 fields_cells = api.model(
     "Cells",
-    {
-        "cells": fields.List(
-            fields.String(), required=True, example=["Rome", "Paris", "Praga"]
-        )
-    },
+    {"cells": fields.List(fields.String(), required=True, example=["Rome", "Paris", "Praga"])},
 )
 
 
@@ -221,7 +210,6 @@ class Info(Resource):
 
 
 class BaseEndpoint(Resource):
-
     def validate_and_get_json_format(self):
         try:
             data = request.get_json()["json"]
@@ -238,8 +226,8 @@ class BaseEndpoint(Resource):
         "limit": "The number of entities to be retrieved. The default value is 1000.",
         "kind": "Kind of Named Entity to be matched. Available values: <code>entity</code>, <code>disambiguation</code>, <code>type</code> and <code>predicate</code>.",
         "NERtype": "Type of Named Entity to be matched. Available values: <code>LOC</code>, <code>ORG</code>, <code>PERS</code> and <code>OTHERS</code>.",
-        "explicit_types" : "Type or types belonging to Wikidata.",
-        "extended_types" : "Type or types belonging to Wikidata extended from the explicit types thanks to the trnasitive closure.",
+        "explicit_types": "Type or types belonging to Wikidata.",
+        "extended_types": "Type or types belonging to Wikidata extended from the explicit types thanks to the trnasitive closure.",
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
         "fuzzy": "Set this param to True if fuzzy search must be applied. Default is <code>False</code>.",
         "types": "Types to be matched in the Knowledge Graph as constraint in the retrieval. Add Types separeted by spaces. E.g. Scientist Philosopher Person",
@@ -304,9 +292,7 @@ class Lookup(BaseEndpoint):
         if not limit_is_valid:
             return limit_error_or_value
 
-        NERtype_is_valid, NERtype_error_or_value = params_validator.validate_NERtype(
-            NERtype
-        )
+        NERtype_is_valid, NERtype_error_or_value = params_validator.validate_NERtype(NERtype)
         if not NERtype_is_valid:
             return NERtype_error_or_value
 
@@ -403,17 +389,13 @@ class Objects(BaseEndpoint):
             is_data_valid, data = super().validate_and_get_json_format()
             if is_data_valid:
                 try:
-                    result = objects_retriever.get_objects_output(
-                        data, kg_error_or_value
-                    )
+                    result = objects_retriever.get_objects_output(data, kg_error_or_value)
                     return result
                 except Exception:
                     print(traceback.format_exc())
             else:
                 print("objects invalid", data, flush=True)
-                return build_error(
-                    "Invalid Data", 400, traceback=traceback.format_exc()
-                )
+                return build_error("Invalid Data", 400, traceback=traceback.format_exc())
 
 
 @entity.route("/bow")
@@ -450,17 +432,13 @@ class Bow(BaseEndpoint):
                 try:
                     row_text = data.get("text")  # Expected row text in the input JSON
                     qids = data.get("qids", [])  # Expected QIDs list in the input JSON
-                    result = bow_retriever.get_bow_output(
-                        row_text, qids, kg=kg_error_or_value
-                    )
+                    result = bow_retriever.get_bow_output(row_text, qids, kg=kg_error_or_value)
                     return result
                 except Exception:
                     print(traceback.format_exc())
             else:
                 print("objects invalid", data, flush=True)
-                return build_error(
-                    "Invalid Data", 400, traceback=traceback.format_exc()
-                )
+                return build_error("Invalid Data", 400, traceback=traceback.format_exc())
 
 
 @entity.route("/predicates")
@@ -494,9 +472,7 @@ class Predicates(BaseEndpoint):
         else:
             is_data_valid, data = super().validate_and_get_json_format()
             if is_data_valid:
-                return predicates_retriever.get_predicates_output(
-                    data, kg_error_or_value
-                )
+                return predicates_retriever.get_predicates_output(data, kg_error_or_value)
             else:
                 return build_error("Invalid Data", 400)
 
@@ -536,9 +512,7 @@ class Labels(BaseEndpoint):
             else:
                 is_data_valid, data = super().validate_and_get_json_format()
                 if is_data_valid:
-                    return labels_retriever.get_labels_output(
-                        data, kg_error_or_value, lang
-                    )
+                    return labels_retriever.get_labels_output(data, kg_error_or_value, lang)
                 else:
                     return build_error("Invalid Data", 400)
         except Exception as e:

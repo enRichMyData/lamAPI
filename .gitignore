@@ -168,3 +168,5 @@ data/
 elasticdata/
 .vscode/launch.json
 work/
+types-db/
+.venv/

@@ -1,7 +1,9 @@
 import os
+
 from model.utils import build_error
 
 ACCESS_TOKEN = os.environ["LAMAPI_TOKEN"]
+
 
 class ParamsValidator:
     def validate_token(self, token):
@@ -26,7 +28,6 @@ class ParamsValidator:
             limit = int(limit)
             return True, limit
         except Exception:
-
             return False, build_error("limit parameter cannot be converted to int", 400)
 
     def validate_k(self, k):
@@ -34,7 +35,6 @@ class ParamsValidator:
             int(k)
             return True, None
         except Exception:
-
             return False, build_error("k parameter cannot be converted to int", 400)
 
     def validate_bool(self, string_value):
@@ -47,8 +47,7 @@ class ParamsValidator:
                 return False, build_error("Bool parameter cannot be converted", 400)
         else:
             return True, False
-        
-    
+
     def validate_NERtype(self, NERtype):
         if NERtype is None or len(NERtype) == 0:
             return True, None

@@ -1,11 +1,12 @@
 # parsing_cb.py
 
+import argparse
 import os
+
+import dateutil.parser
 import pandas as pd
 from pymongo import MongoClient
 from tqdm import tqdm
-import dateutil.parser
-import argparse
 
 
 def create_indexes(db):
@@ -110,9 +111,7 @@ def read_additional_data(file_path):
     chunk_size = 1000
 
     total_lines = sum(1 for _ in open(file_path))
-    total_chunks = total_lines // chunk_size + (
-        1 if total_lines % chunk_size != 0 else 0
-    )
+    total_chunks = total_lines // chunk_size + (1 if total_lines % chunk_size != 0 else 0)
 
     with tqdm(total=total_chunks, desc="Reading additional data") as pbar:
         for chunk in pd.read_csv(file_path, chunksize=chunk_size):
@@ -132,9 +131,7 @@ def process_main_data(file_path, additional_data):
     chunk_size = 1000
 
     total_lines = sum(1 for _ in open(file_path))
-    total_chunks = total_lines // chunk_size + (
-        1 if total_lines % chunk_size != 0 else 0
-    )
+    total_chunks = total_lines // chunk_size + (1 if total_lines % chunk_size != 0 else 0)
 
     with tqdm(total=total_chunks, desc="Processing main data") as pbar:
         index = 0
@@ -150,19 +147,13 @@ def process_main_data(file_path, additional_data):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Process data and insert into MongoDB."
-    )
+    parser = argparse.ArgumentParser(description="Process data and insert into MongoDB.")
     parser.add_argument("--db_name", type=str, required=True, help="Database name")
-    parser.add_argument(
-        "--main_file", type=str, required=True, help="Main CSV file path"
-    )
+    parser.add_argument("--main_file", type=str, required=True, help="Main CSV file path")
     parser.add_argument(
         "--additional_file", type=str, required=True, help="Additional CSV file path"
     )
-    parser.add_argument(
-        "--batch_size", type=int, default=1000, help="Batch size for insertion"
-    )
+    parser.add_argument("--batch_size", type=int, default=1000, help="Batch size for insertion")
 
     args = parser.parse_args()
 

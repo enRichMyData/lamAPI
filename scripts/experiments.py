@@ -1,81 +1,80 @@
-import os
-import pandas as pd
-from tqdm import tqdm
-import logging
-import requests
-from SPARQLWrapper import SPARQLWrapper, JSON
-import random
-import json
-import aiohttp
 import asyncio
+import json
+import logging
+import os
+import random
+
+import aiohttp
 import backoff
-from tqdm.asyncio import (
+import pandas as pd
+import requests
+from tqdm import tqdm
+from tqdm.asyncio import (  # Optional: Use asyncio-compatible progress bars if available
     tqdm_asyncio,
-)  # Optional: Use asyncio-compatible progress bars if available
+)
 
-
-R1_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round1/R1_NER_query_type.json"
+R1_json_file_path = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round1/R1_NER_query_type.json"
+)
 
 with open(R1_json_file_path, "r") as file:
     R1_ner_type = json.load(file)
 
-R1_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round1/R1_WD_query_type.json"
+R1_json_file_path = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round1/R1_WD_query_type.json"
+)
 
 with open(R1_json_file_path, "r") as file:
     R1_explicit_type = json.load(file)
 
-R1_tables_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/tables/"
+R1_tables_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/tables/"
+R1_cea_file = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/gt/CEA_Round1_gt_WD.csv"
 )
-R1_cea_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/gt/CEA_Round1_gt_WD.csv"
-R1_cta_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/gt/CTA_Round1_gt.csv"
+R1_cta_file = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round1_T2D/gt/CTA_Round1_gt.csv"
+)
 ################################
 
-R3_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round3/R3_NER_query_type.json"
+R3_json_file_path = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round3/R3_NER_query_type.json"
+)
 
 with open(R3_json_file_path, "r") as file:
     R3_ner_type = json.load(file)
 
-R3_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round3/R3_WD_query_type.json"
+R3_json_file_path = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/_Round3/R3_WD_query_type.json"
+)
 
 with open(R3_json_file_path, "r") as file:
     R3_explicit_type = json.load(file)
 
-R3_tables_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/tables/"
+R3_tables_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/tables/"
+R3_cea_file = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/gt/CEA_Round3_gt_WD.csv"
 )
-R3_cea_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/gt/CEA_Round3_gt_WD.csv"
-R3_cta_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/gt/CTA_Round3_gt.csv"
+R3_cta_file = (
+    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round3_2019/gt/CTA_Round3_gt.csv"
+)
 ##############################
 
-R4_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_Round4/R4_NER_query_type.json"
-)
+R4_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_Round4/R4_NER_query_type.json"
 
 with open(R4_json_file_path, "r") as file:
     R4_ner_type = json.load(file)
 
-R4_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_Round4/R4_WD_query_type.json"
-)
+R4_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_Round4/R4_WD_query_type.json"
 
 with open(R4_json_file_path, "r") as file:
     R4_explicit_type = json.load(file)
 
-R4_tables_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/tables/"
-)
-R4_cea_file = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/gt/cea.csv"
-)
-R4_cta_file = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/gt/cta.csv"
-)
+R4_tables_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/tables/"
+R4_cea_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/gt/cea.csv"
+R4_cta_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/Downloads/Round4_2020/gt/cta.csv"
 ##############################
 
-HTR2_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/_HTR2/HTR2_NER_query_type.json"
-)
+HTR2_json_file_path = "/home/lamapi/lamAPI/data/Downloads/_HTR2/HTR2_NER_query_type.json"
 
 with open(HTR2_json_file_path, "r") as file:
     HTR2_ner_type = json.load(file)
@@ -90,16 +89,12 @@ HTR2_cea_file = "/home/lamapi/lamAPI/data/Downloads/HardTablesR2/gt/cea.csv"
 HTR2_cta_file = "/home/lamapi/lamAPI/data/Downloads/HardTablesR2/gt/cta.csv"
 ##############################
 
-HTR3_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_HTR3/HTR3_NER_query_type.json"
-)
+HTR3_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_HTR3/HTR3_NER_query_type.json"
 
 with open(HTR3_json_file_path, "r") as file:
     HTR3_ner_type = json.load(file)
 
-HTR3_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_HTR3/HTR3_WD_query_type.json"
-)
+HTR3_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_HTR3/HTR3_WD_query_type.json"
 
 with open(HTR3_json_file_path, "r") as file:
     HTR3_explicit_type = json.load(file)
@@ -108,16 +103,12 @@ HTR3_tables_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/HardTablesR3/ta
 HTR3_cea_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/HardTablesR3/gt/cea.csv"
 HTR3_cta_file = "/home/lamapi/lamAPI/data/Downloads/Downloads/HardTablesR3/gt/cta.csv"
 #############################
-R42T_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_2TR4/2T_NER_query_type.json"
-)
+R42T_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_2TR4/2T_NER_query_type.json"
 
 with open(R42T_json_file_path, "r") as file:
     R42T_ner_type = json.load(file)
 
-R42T_json_file_path = (
-    "/home/lamapi/lamAPI/data/Downloads/Downloads/_2TR4/2T_WD_query_type.json"
-)
+R42T_json_file_path = "/home/lamapi/lamAPI/data/Downloads/Downloads/_2TR4/2T_WD_query_type.json"
 
 with open(R42T_json_file_path, "r") as file:
     R42T_explicit_type = json.load(file)
@@ -149,17 +140,13 @@ prefix = ["R1", "R3", "R4", "HTR2", "HTR3", "2T"]
 
 
 # Initialize logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 # Function to read CEA file and create dictionaries
 def read_cea_file(cea_file):
     df_cea = pd.read_csv(cea_file, header=None)
-    df_cea["key"] = (
-        df_cea[0] + " " + df_cea[1].astype(str) + " " + df_cea[2].astype(str)
-    )
+    df_cea["key"] = df_cea[0] + " " + df_cea[1].astype(str) + " " + df_cea[2].astype(str)
     df_cea["key_col"] = df_cea[0] + " " + df_cea[2].astype(str)
     cea_values_dict = dict(zip(df_cea["key_col"].values, df_cea[3].values))
     cea_values_dict_cell = dict(zip(df_cea["key"].values, df_cea[3].values))
@@ -179,9 +166,7 @@ def process_table_file(table_file, cea_keys_set, cea_values_dict_cell):
                 key = f"{table_name} {row+1} {col}"
                 if key in cea_keys_set:
                     cell_value = df.iloc[row, col]
-                    qid = cea_values_dict_cell[key].split("/")[
-                        -1
-                    ]  # Extract the QID from the URL
+                    qid = cea_values_dict_cell[key].split("/")[-1]  # Extract the QID from the URL
                     qid_to_value[cell_value] = qid
                     break  # Exit inner loop early as only one match per row/col is needed
 
@@ -213,16 +198,13 @@ for tables_path, cea_file, name in zip(tables_paths, cea_files, prefix):
     id_to_name_dicts[name + "_id_to_name"] = {}
 
     for table_file in tqdm(table_files, desc=f"Processing tables for {name}"):
-        local_key_to_cell = process_table_file(
-            table_file, cea_keys_set, cea_values_dict_cell
-        )
+        local_key_to_cell = process_table_file(table_file, cea_keys_set, cea_values_dict_cell)
         id_to_name_dicts[name + "_id_to_name"].update(local_key_to_cell)
 
 
 def get_hard_query_ner_to_ner(name, value):
     name = str(name).replace('"', " ")
     if value is not None:
-
         query_dict = {
             "query": {
                 "bool": {
@@ -241,9 +223,7 @@ def get_hard_query_ner_to_ner(name, value):
             "token": "lamapi_demo_2023",
             "kg": "wikidata",
             "limit": 100,
-            "query": json.dumps(
-                query_dict
-            ),  # Convert the query dictionary to a JSON string
+            "query": json.dumps(query_dict),  # Convert the query dictionary to a JSON string
             "sort": ['{"popularity": {"order": "desc"}}'],
         }
 
@@ -289,9 +269,7 @@ for (file_name, id_name), db_name, ner_type in zip(
     tqdm(id_to_name_dicts.items()), prefix, candidate_types_ner
 ):
     tmp_query = []
-    for name, id in tqdm(
-        id_name.items(), desc=f"HARD ner_to_ner: processing {file_name}"
-    ):
+    for name, id in tqdm(id_name.items(), desc=f"HARD ner_to_ner: processing {file_name}"):
         if id in ner_type:
             types_list = ner_type[id]
             query = get_hard_query_ner_to_ner(name, types_list)
@@ -304,9 +282,7 @@ for (file_name, id_name), db_name, ner_type in zip(
     tqdm(id_to_name_dicts.items()), prefix, candidate_types_ner
 ):
     tmp_query = []
-    for name, id in tqdm(
-        id_name.items(), desc=f"SOFT ner_to_ner: processing {file_name}"
-    ):
+    for name, id in tqdm(id_name.items(), desc=f"SOFT ner_to_ner: processing {file_name}"):
         if id in ner_type:
             types_list = ner_type[id]
             query = get_soft_query_ner_to_ner(name, types_list)
@@ -317,7 +293,6 @@ for (file_name, id_name), db_name, ner_type in zip(
 def get_hard_query_explicit_to_extended(name, value):
     name = str(name).replace('"', " ")
     if value is not None:
-
         query_dict = {
             "query": {
                 "bool": {
@@ -336,9 +311,7 @@ def get_hard_query_explicit_to_extended(name, value):
             "token": "lamapi_demo_2023",
             "kg": "wikidata",
             "limit": 100,
-            "query": json.dumps(
-                query_dict
-            ),  # Convert the query dictionary to a JSON string
+            "query": json.dumps(query_dict),  # Convert the query dictionary to a JSON string
             "sort": ['{"popularity": {"order": "desc"}}'],
         }
 
@@ -412,7 +385,6 @@ for (file_name, id_name), db_name, explicit_type in zip(
 def get_hard_query_ner_to_extended(name, value):
     name = str(name).replace('"', " ")
     if value is not None:
-
         query_dict = {
             "query": {
                 "bool": {
@@ -431,14 +403,11 @@ def get_hard_query_ner_to_extended(name, value):
             "token": "lamapi_demo_2023",
             "kg": "wikidata",
             "limit": 100,
-            "query": json.dumps(
-                query_dict
-            ),  # Convert the query dictionary to a JSON string
+            "query": json.dumps(query_dict),  # Convert the query dictionary to a JSON string
             "sort": ['{"popularity": {"order": "desc"}}'],
         }
 
     else:
-
         query_dict = {
             "query": {
                 "bool": {
@@ -457,9 +426,7 @@ def get_hard_query_ner_to_extended(name, value):
             "token": "lamapi_demo_2023",
             "kg": "wikidata",
             "limit": 100,
-            "query": json.dumps(
-                query_dict
-            ),  # Convert the query dictionary to a JSON string
+            "query": json.dumps(query_dict),  # Convert the query dictionary to a JSON string
             "sort": ['{"popularity": {"order": "desc"}}'],
         }
 
@@ -493,9 +460,7 @@ def get_soft_query_ner_to_extended(name, value):
                         "bool": {
                             "must_not": [
                                 {
-                                    "terms": {
-                                        "extended_types": ["Q43229", "Q27096213", "Q5"]
-                                    }
+                                    "terms": {"extended_types": ["Q43229", "Q27096213", "Q5"]}
                                 }  # Exclude documents mapped to ORG, LOC or PERS (include only OTHERS)
                             ]
                         }
@@ -529,9 +494,7 @@ for (file_name, id_name), db_name, explicit_type in zip(
     tqdm(id_to_name_dicts.items()), prefix, candidate_types_ner
 ):
     tmp_query = []
-    for name, id in tqdm(
-        id_name.items(), desc=f"HARD ner_to_extended: processing {file_name}"
-    ):
+    for name, id in tqdm(id_name.items(), desc=f"HARD ner_to_extended: processing {file_name}"):
         if id in ner_type:
             types_list = ner_type[id]
             mapped_type = entity_mapping.get(types_list)
@@ -545,9 +508,7 @@ for (file_name, id_name), db_name, explicit_type in zip(
     tqdm(id_to_name_dicts.items()), prefix, candidate_types_ner
 ):
     tmp_query = []
-    for name, id in tqdm(
-        id_name.items(), desc=f"SOFT ner_to_extended: processing {file_name}"
-    ):
+    for name, id in tqdm(id_name.items(), desc=f"SOFT ner_to_extended: processing {file_name}"):
         if id in ner_type:
             types_list = ner_type[id]
             mapped_type = entity_mapping.get(types_list)
@@ -577,9 +538,7 @@ async def fetch(session, url, params, headers, semaphore):
     async with semaphore:
         # Convert all params to str, int, or float
         # params = {k: (int(v) if isinstance(v, np.integer) else str(v)) for k, v in params.items()}
-        async with session.get(
-            url, params=params, headers=headers, timeout=60
-        ) as response:
+        async with session.get(url, params=params, headers=headers, timeout=60) as response:
             try:
                 response.raise_for_status()  # Raises an exception for 4XX/5XX status codes
                 return await response.json()
@@ -617,9 +576,7 @@ async def process_item(session, url, id, headers, params, semaphore, pbar):
                 if pos_score:
                     mrr_increment = (num_result - (pos_score * num_result)) / num_result
                 else:
-                    mrr_increment = (
-                        1 / num_result
-                    )  # Assume worst case for MRR if pos_score is 0
+                    mrr_increment = 1 / num_result  # Assume worst case for MRR if pos_score is 0
                 return mrr_increment, 1
 
     return 0, 0
@@ -634,9 +591,7 @@ async def main(queries, url, pbar, failed_queries, db_name, query_group_name):
     async with aiohttp.ClientSession() as session:
         tasks = []
         for param, id, _ in queries:
-            tasks.append(
-                process_item(session, url, id, headers, param, semaphore, pbar)
-            )
+            tasks.append(process_item(session, url, id, headers, param, semaphore, pbar))
 
         results = await asyncio.gather(*tasks)
 
@@ -645,7 +600,7 @@ async def main(queries, url, pbar, failed_queries, db_name, query_group_name):
                 failed_queries[id] = (id, item_NERtype)
 
                 # redo the same query with the fuzzy
-                name = param["name"]
+                param["name"]
 
                 # Parse the string into a Python dictionary
                 query_dict = json.loads(param["query"])
@@ -721,9 +676,7 @@ async def run_queries():
                 queries = random.sample(queries, 1000)
 
             # Optionally, you can use an async-friendly progress bar (like tqdm_asyncio)
-            pbar = tqdm_asyncio(
-                total=len(queries), desc=f"{query_group_name} for {db_name}"
-            )
+            pbar = tqdm_asyncio(total=len(queries), desc=f"{query_group_name} for {db_name}")
 
             # Schedule the main() call as a concurrent task
             tasks.append(
@@ -739,9 +692,7 @@ async def run_queries():
             if len(queries) >= 1000:
                 queries = random.sample(queries, 1000)
 
-            pbar = tqdm_asyncio(
-                total=len(queries), desc=f"{query_group_name} for {db_name}"
-            )
+            pbar = tqdm_asyncio(total=len(queries), desc=f"{query_group_name} for {db_name}")
             tasks.append(
                 asyncio.create_task(
                     main(queries, url, pbar, failed_queries, db_name, query_group_name)

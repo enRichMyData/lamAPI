@@ -65,7 +65,7 @@ MONGO_ENDPOINT_USERNAME = os.environ["MONGO_INITDB_ROOT_USERNAME"]
 # Use environment variable, fallback to localhost if needed
 MONGO_ENDPOINT = "localhost"
 MONGO_ENDPOINT_PASSWORD = os.environ["MONGO_INITDB_ROOT_PASSWORD"]
-DB_NAME = f"wikidata17012025"
+DB_NAME = "wikidata17012025"
 print(f"Connecting to MongoDB at {MONGO_ENDPOINT}:{MONGO_ENDPOINT_PORT}...")
 
 # Mongo collections
@@ -264,9 +264,7 @@ def create_indexes(db):
                 existing_unique = existing_idx.get("unique", False)
 
                 if existing_key == expected_key and existing_unique == is_unique:
-                    print(
-                        f"  ✓ Index '{index_name}' already exists with correct specification"
-                    )
+                    print(f"  ✓ Index '{index_name}' already exists with correct specification")
                     continue
                 else:
                     print(
@@ -282,21 +280,19 @@ def create_indexes(db):
 
             # Special handling for unique indexes - clean duplicates first
             if is_unique and collection_name == "types_cache":
-                print(f"  🧹 Cleaning duplicate data before creating unique index...")
+                print("  🧹 Cleaning duplicate data before creating unique index...")
                 _remove_duplicates_from_types_cache(collection)
 
             # Create the index
             try:
                 print(f"  🔨 Creating index '{index_name}'...")
-                collection.create_index(
-                    fields, unique=is_unique, background=True, name=index_name
-                )
+                collection.create_index(fields, unique=is_unique, background=True, name=index_name)
                 print(f"  ✅ Successfully created index '{index_name}'")
 
             except Exception as e:
                 if "DuplicateKey" in str(e) and is_unique:
                     print(f"  ❌ Cannot create unique index due to duplicate data: {e}")
-                    print(f"      Consider cleaning the collection first")
+                    print("      Consider cleaning the collection first")
                 elif "IndexOptionsConflict" in str(e) or "85" in str(e):
                     print(f"  ⚠ Index name conflict, trying alternative approach: {e}")
                     # Try with a different name
@@ -307,9 +303,7 @@ def create_indexes(db):
                         )
                         print(f"  ✅ Created index with alternative name '{alt_name}'")
                     except Exception as e2:
-                        print(
-                            f"  ❌ Failed to create index even with alternative name: {e2}"
-                        )
+                        print(f"  ❌ Failed to create index even with alternative name: {e2}")
                 else:
                     print(f"  ❌ Failed to create index '{index_name}': {e}")
 
@@ -340,9 +334,7 @@ def _cleanup_conflicting_indexes(collection, target_fields, target_name):
                 print(f"    🗑 Dropping conflicting index '{index_name}'")
                 collection.drop_index(index_name)
             except Exception as e:
-                print(
-                    f"    Warning: Could not drop conflicting index '{index_name}': {e}"
-                )
+                print(f"    Warning: Could not drop conflicting index '{index_name}': {e}")
 
 
 def _remove_duplicates_from_types_cache(collection):
@@ -373,7 +365,7 @@ def _remove_duplicates_from_types_cache(collection):
 
         total_removed = 0
         for dup_group in duplicates:
-            entity = dup_group["_id"]
+            dup_group["_id"]
             docs = dup_group["docs"]
 
             # Sort by _id to keep the most recent (assuming ObjectId)
@@ -535,14 +527,12 @@ def transitive_closure_from_sparql(entities: list[str]) -> dict[str, set[str]]:
 
     # Set up the SPARQL client
     sparql = SPARQLWrapper(endpoint_url)
-    sparql.addCustomHttpHeader(
-        "User-Agent", "WikidataParser/1.0 (belo.fede@outlook.com)"
-    )
+    sparql.addCustomHttpHeader("User-Agent", "WikidataParser/1.0 (belo.fede@outlook.com)")
 
     # Execute the query with backoff
     try:
         results = query_wikidata(sparql, query)
-    except Exception as e:
+    except Exception:
         print(f"Failed to retrieve superclasses for {','.join(list(entities_set))}")
         return {e: set() for e in entities_set}
 
@@ -647,10 +637,8 @@ def transitive_closure(
             for entity_id, types_set in result.items()
         ]
         types_cache_c.insert_many(docs, ordered=False)
-    except Exception as e:
-        print(
-            f"Warning: Could not cache superclasses for {','.join(list(entities_set))}"
-        )
+    except Exception:
+        print(f"Warning: Could not cache superclasses for {','.join(list(entities_set))}")
         return {e: set() for e in entities_set}
     return result
 
@@ -770,9 +758,7 @@ def batch_check_entities_processed(entity_ids):
 
     # Batch query for uncached entities
     if uncached_ids:
-        cursor = items_c.find(
-            {"entity": {"$in": uncached_ids}}, {"entity": 1, "_id": 0}
-        )
+        cursor = items_c.find({"entity": {"$in": uncached_ids}}, {"entity": 1, "_id": 0})
         processed_entities = {doc["entity"] for doc in cursor}
 
         # Update results and cache
@@ -920,7 +906,7 @@ def parse_data(
                         if predicate not in lit:
                             lit[predicate] = []
                         lit[predicate].append(value)
-            except KeyError as e:
+            except KeyError:
                 # Skip malformed claims
                 continue
 
@@ -976,9 +962,7 @@ def parse_wikidata_dump(
 
     def safe_sparql_query(root_id, description):
         try:
-            return get_wikidata_item_tree_item_idsSPARQL(
-                [root_id], backward_properties=[279]
-            )
+            return get_wikidata_item_tree_item_idsSPARQL([root_id], backward_properties=[279])
         except Exception as e:
             print(f"Failed to load {description}: {e}")
             return []
@@ -1197,10 +1181,8 @@ def parse_wikidata_dump(
 
     # Final summary
     total_time = time.time() - start_time
-    total_items = processed_count + skipped_count
-    avg_mb_rate = (
-        (bytes_processed / (1024 * 1024)) / total_time if total_time > 0 else 0
-    )
+    processed_count + skipped_count
+    avg_mb_rate = (bytes_processed / (1024 * 1024)) / total_time if total_time > 0 else 0
 
     print("\n" + "=" * 60)
     print("PROCESSING COMPLETED")
@@ -1235,9 +1217,7 @@ def estimate_compression_ratio_sampling(bz2_file_path, sample_size_mb=100):
         total_compressed_size = os.path.getsize(bz2_file_path)
         sample_size_bytes = sample_size_mb * 1024 * 1024
 
-        print(
-            f"Sampling {sample_size_mb}MB of uncompressed data to estimate compression ratio..."
-        )
+        print(f"Sampling {sample_size_mb}MB of uncompressed data to estimate compression ratio...")
 
         # Track compressed bytes read
         compressed_bytes_read = 0
@@ -1265,7 +1245,7 @@ def estimate_compression_ratio_sampling(bz2_file_path, sample_size_mb=100):
         # Estimate total uncompressed size
         estimated_uncompressed_size = int(total_compressed_size * actual_ratio)
 
-        print(f"Sample results:")
+        print("Sample results:")
         print(
             f"  - Compressed bytes read: {compressed_bytes_read:,} ({compressed_bytes_read/(1024*1024):.2f} MB)"
         )
@@ -1335,46 +1315,37 @@ def estimate_dump_statistics(file_path):
             avg_item_size_uncompressed = sample_bytes_uncompressed / sample_items
 
             # Use actual sampling to measure compression ratio
-            actual_ratio, _, estimated_uncompressed_size = (
-                estimate_compression_ratio_sampling(file_path)
+            actual_ratio, _, estimated_uncompressed_size = estimate_compression_ratio_sampling(
+                file_path
             )
 
             # Calculate estimates
-            estimated_total_items = int(
-                estimated_uncompressed_size / avg_item_size_uncompressed
-            )
+            estimated_total_items = int(estimated_uncompressed_size / avg_item_size_uncompressed)
 
             stats = {
                 "compressed_size_mb": compressed_mb,
                 "estimated_compression_ratio": actual_ratio,
                 "avg_item_size_uncompressed": avg_item_size_uncompressed,
                 "estimated_total_items": estimated_total_items,
-                "estimated_uncompressed_size_mb": estimated_uncompressed_size
-                / (1024 * 1024),
+                "estimated_uncompressed_size_mb": estimated_uncompressed_size / (1024 * 1024),
             }
 
-            print(
-                f"Average item size (uncompressed): {avg_item_size_uncompressed:.0f} bytes"
-            )
+            print(f"Average item size (uncompressed): {avg_item_size_uncompressed:.0f} bytes")
             print(f"Estimated total items: {estimated_total_items:,}")
-            print(
-                f"Estimated uncompressed size: {stats['estimated_uncompressed_size_mb']:.2f} MB"
-            )
+            print(f"Estimated uncompressed size: {stats['estimated_uncompressed_size_mb']:.2f} MB")
 
             return stats
         else:
             print("Warning: Could not sample file for item size estimation")
             # Use actual compression ratio but with fallback item size
-            actual_ratio, _, estimated_uncompressed_size = (
-                estimate_compression_ratio_sampling(file_path)
+            actual_ratio, _, estimated_uncompressed_size = estimate_compression_ratio_sampling(
+                file_path
             )
             avg_item_size = 2048  # Typical Wikidata entity size
 
             return {
                 "compressed_size_mb": compressed_mb,
-                "estimated_total_items": int(
-                    estimated_uncompressed_size / avg_item_size
-                ),
+                "estimated_total_items": int(estimated_uncompressed_size / avg_item_size),
                 "estimated_compression_ratio": actual_ratio,
                 "avg_item_size_uncompressed": avg_item_size,
             }
@@ -1387,9 +1358,7 @@ def estimate_dump_statistics(file_path):
 
         return {
             "compressed_size_mb": compressed_size / (1024 * 1024),
-            "estimated_total_items": int(
-                compressed_size * estimated_compression_ratio / 2048
-            ),
+            "estimated_total_items": int(compressed_size * estimated_compression_ratio / 2048),
             "estimated_compression_ratio": estimated_compression_ratio,
             "avg_item_size_uncompressed": 2048,
         }
@@ -1438,9 +1407,7 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Parse Wikidata dump and insert into MongoDB"
-    )
+    parser = argparse.ArgumentParser(description="Parse Wikidata dump and insert into MongoDB")
     parser.add_argument(
         "--wikidata_dump_path",
         help="Path to the Wikidata dump file",

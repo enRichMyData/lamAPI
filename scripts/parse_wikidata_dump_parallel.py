@@ -41,8 +41,6 @@ Usage:
     python parse_wikidata_dump_parallel.py --stdin-json  # For piped input
 """
 
-from functools import partial
-from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -179,9 +177,7 @@ class Processor:
                             for attempt in range(5):
                                 time.sleep(0.2)
                                 try:
-                                    self.read_queue.put(
-                                        (block_id, complete_lines), timeout=1.0
-                                    )
+                                    self.read_queue.put((block_id, complete_lines), timeout=1.0)
                                     block_id += 1
                                     break
                                 except queue.Full:
@@ -229,9 +225,7 @@ class Processor:
                         line_buffer = line_buffer[self.lines_per_block :]
 
                         try:
-                            self.process_queue.put(
-                                (block_id, processing_block), timeout=0.2
-                            )
+                            self.process_queue.put((block_id, processing_block), timeout=0.2)
                             block_id += 1
                         except queue.Full:
                             while not self.stop_processing.is_set():
@@ -401,7 +395,7 @@ class Processor:
                     processed_entities.append(result)
                     entities_processed += 1
 
-            except Exception as e:
+            except Exception:
                 processing_errors += 1
                 continue
 
@@ -602,9 +596,7 @@ class Processor:
 
                     # Update more frequently when queues are getting full
                     if proc_q_size > self.process_queue.maxsize * 0.8:
-                        time.sleep(
-                            0.2
-                        )  # More frequent updates when queue is nearly full
+                        time.sleep(0.2)  # More frequent updates when queue is nearly full
                     else:
                         time.sleep(0.5)  # Normal update interval
                 except Exception as e:
@@ -662,7 +654,7 @@ class WikidataParser:
         MONGO_ENDPOINT_PORT = int(MONGO_ENDPOINT_PORT)
         MONGO_ENDPOINT_USERNAME = os.environ["MONGO_INITDB_ROOT_USERNAME"]
         MONGO_ENDPOINT_PASSWORD = os.environ["MONGO_INITDB_ROOT_PASSWORD"]
-        DB_NAME = f"wikidata17012025"
+        DB_NAME = "wikidata17012025"
 
         print(f"Connecting to MongoDB at {MONGO_ENDPOINT}:{MONGO_ENDPOINT_PORT}...")
 
@@ -818,9 +810,7 @@ class WikidataParser:
                 missing_results = self.transitive_closure_from_sparql(missing_entities)
                 cached_result.update(missing_results)
             else:
-                missing_results = self.transitive_closure_from_db(
-                    connection, missing_entities
-                )
+                missing_results = self.transitive_closure_from_db(connection, missing_entities)
                 cached_result.update(missing_results)
 
             # Cache the missing results in database (async to avoid blocking)
@@ -828,12 +818,10 @@ class WikidataParser:
                 try:
                     docs = []
                     for entity, types in missing_results.items():
-                        docs.append(
-                            {"entity": entity, "extended_types": list(set(types))}
-                        )
+                        docs.append({"entity": entity, "extended_types": list(set(types))})
                     if docs:
                         self.types_cache_c.insert_many(docs, ordered=False)
-                except Exception as e:
+                except Exception:
                     pass
 
         return cached_result
@@ -913,9 +901,7 @@ class WikidataParser:
 
         # Set up the SPARQL client
         sparql = SPARQLWrapper("https://query.wikidata.org/sparql")
-        sparql.addCustomHttpHeader(
-            "User-Agent", "WikidataParser/1.0 (belo.fede@outlook.com)"
-        )
+        sparql.addCustomHttpHeader("User-Agent", "WikidataParser/1.0 (belo.fede@outlook.com)")
         results = query_wikidata(sparql, query)
         out = {}
         for result in results.get("results", {}).get("bindings", {}):
@@ -953,9 +939,7 @@ class WikidataParser:
 
         return is_processed
 
-    def parse_data(
-        self, item, i, geolocation_subclass, organization_subclass, connection=None
-    ):
+    def parse_data(self, item, i, geolocation_subclass, organization_subclass, connection=None):
         """Parse individual Wikidata entity (optimized for performance)"""
         # Basic entity info
         entity = item["id"]
@@ -984,13 +968,24 @@ class WikidataParser:
         is_type = item["claims"].get("P279", None)
         if is_type is not None:
             category = "type"
-        if entity[0] == "P":
+        elif entity[0] == "P":
             category = "predicate"
+        else:
+            instance_of = item["claims"].get("P31", None)
+        if instance_of is not None:
+            for claim in instance_of:
+                mainsnak = claim.get("mainsnak", {})
+                datavalue = mainsnak.get("datavalue", {})
+                claim_qid = datavalue.get("value", {}).get("id", None)
+                if claim_qid is not None:
+                    if claim_qid == "Q4167410":  # Wikimedia disambiguation page
+                        category = "disambiguation"
 
         # NER type classification and extended types processing
-        NERtype = set()
+        ner_types = list()
         explicit_types = set()
         extended_types = set()
+        ner_counter = Counter()
         types = {"P31": [], "P279": []}
 
         if item.get("type") == "item" and "claims" in item:
@@ -1002,21 +997,32 @@ class WikidataParser:
                     mainsnak = claim.get("mainsnak", {})
                     datavalue = mainsnak.get("datavalue", {})
                     claim_qid = datavalue.get("value", {}).get("id", None)
-
                     if claim_qid is not None:
                         explicit_types.add(claim_qid)
-                        if claim_qid == 5:
-                            NERtype.add("PERS")
+                        claim_id_numeric = (
+                            int(claim_qid[1:]) if claim_qid.startswith("Q") else None
+                        )
+                        if claim_id_numeric == 5:
+                            ner_counter["PERS"] += 1
                         elif claim_qid in geolocation_subclass:
-                            NERtype.add("LOC")
+                            ner_counter["LOC"] += 1
                         elif claim_qid in organization_subclass:
-                            NERtype.add("ORG")
+                            ner_counter["ORG"] += 1
                         else:
-                            NERtype.add("OTHERS")
+                            ner_counter["OTHERS"] += 1
                     if mainsnak.get("property") == "P31":
                         types["P31"].append(claim_qid)
                     elif mainsnak.get("property") == "P279":
                         types["P279"].append(claim_qid)
+                for ner_type in ner_counter:
+                    if ner_type == "ORG":
+                        ner_types.append("ORG")
+                    elif ner_type == "PERS":
+                        ner_types.append("PERS")
+                    elif ner_type == "LOC":
+                        ner_types.append("LOC")
+                    elif ner_type == "OTHERS":
+                        ner_types.append("OTHERS")
 
         for explicit_type, retrieved_superclasses in self.transitive_closure(
             explicit_types, connection
@@ -1041,10 +1047,7 @@ class WikidataParser:
                     lang = sitelink_lang.split("wiki")[0]
                     title = sitelink["title"]
                     url_dict["wikipedia"] = (
-                        "https://"
-                        + lang
-                        + ".wikipedia.org/wiki/"
-                        + title.replace(" ", "_")
+                        "https://" + lang + ".wikipedia.org/wiki/" + title.replace(" ", "_")
                     )
                 else:
                     url_dict["wikipedia"] = ""
@@ -1077,7 +1080,7 @@ class WikidataParser:
                             if predicate not in lit:
                                 lit[predicate] = []
                             lit[predicate].append(value)
-                except KeyError as e:
+                except KeyError:
                     continue
 
         join = {
@@ -1090,7 +1093,7 @@ class WikidataParser:
                 "types": types,
                 "popularity": popularity,
                 "kind": category,
-                "ner_types": list(NERtype),
+                "ner_types": ner_types,
                 "urls": url_dict,
                 "extended_types": list(extended_types),
                 "explicit_types": list(explicit_types),
@@ -1116,9 +1119,7 @@ class WikidataParser:
 
         # Load processed entities if skipping (using optimized database-based approach)
         if skip_existing:
-            print(
-                "Skip mode enabled - using optimized database-based skip detection..."
-            )
+            print("Skip mode enabled - using optimized database-based skip detection...")
             # Ensure entity index exists for fast lookups
             try:
                 print("Creating database indexes for optimal performance...")
@@ -1146,9 +1147,7 @@ class WikidataParser:
         country_subclass = safe_sparql_query(6256, "country subclass")
         city_subclass = safe_sparql_query(515, "city subclass")
         capitals_subclass = safe_sparql_query(5119, "capitals subclass")
-        admTerr_subclass = safe_sparql_query(
-            15916867, "administrative territory subclass"
-        )
+        admTerr_subclass = safe_sparql_query(15916867, "administrative territory subclass")
         family_subclass = safe_sparql_query(17350442, "family subclass")
         sportLeague_subclass = safe_sparql_query(623109, "sports league subclass")
         venue_subclass = safe_sparql_query(8436, "venue subclass")
@@ -1170,9 +1169,7 @@ class WikidataParser:
         food_subclass = safe_sparql_query(2095, "food subclass")
         edInst_subclass = safe_sparql_query(2385804, "educational institution subclass")
         govAgency_subclass = safe_sparql_query(327333, "government agency subclass")
-        intOrg_subclass = safe_sparql_query(
-            484652, "international organization subclass"
-        )
+        intOrg_subclass = safe_sparql_query(484652, "international organization subclass")
         timeZone_subclass = safe_sparql_query(12143, "time zone subclass")
 
         # Remove overlaps for geolocation_subclass
@@ -1377,7 +1374,7 @@ def main():
     cpu_count = multiprocessing.cpu_count()
     threads = args.threads or min(8, max(4, cpu_count - 2))
 
-    print(f"🎯 Configuration:")
+    print("🎯 Configuration:")
     print(f"   Input: {'stdin' if args.stdin_json else args.input}")
     print(f"   Processing threads: {threads}")
     print(f"   Skip existing: {args.skip_existing}")
@@ -1386,10 +1383,8 @@ def main():
     print(f"   Total CPU cores: {cpu_count}")
 
     if args.stdin_json:
-        print(f"\n💡 Recommended usage:")
-        print(
-            f"   pbzip2 -dc dump.json.bz2 | python3 {os.path.basename(__file__)} --stdin-json"
-        )
+        print("\n💡 Recommended usage:")
+        print(f"   pbzip2 -dc dump.json.bz2 | python3 {os.path.basename(__file__)} --stdin-json")
 
     # Create parser and run
     wikidata_parser = WikidataParser()

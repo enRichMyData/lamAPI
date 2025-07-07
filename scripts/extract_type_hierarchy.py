@@ -362,9 +362,7 @@ class StreamingProcessor:
 
                         # Non-blocking put with timeout to prevent stalls
                         try:
-                            self.process_queue.put(
-                                (block_id, processing_block), timeout=0.1
-                            )
+                            self.process_queue.put((block_id, processing_block), timeout=0.1)
                             block_id += 1
                         except queue.Full:
                             # If queue full, force the put (this will block briefly)
@@ -528,9 +526,7 @@ class StreamingProcessor:
             processor_threads.append(t)
 
         # Writer thread
-        writer_thread = threading.Thread(
-            target=self.writer_worker, args=(inst_f, sub_f)
-        )
+        writer_thread = threading.Thread(target=self.writer_worker, args=(inst_f, sub_f))
         writer_thread.start()
 
         # Progress monitoring
@@ -611,7 +607,6 @@ class StreamingProcessor:
         )
 
         def update_progress():
-            update_count = 0
             last_checkpoint_time = time.time()
 
             while not self.stop_processing.is_set():
@@ -639,9 +634,7 @@ class StreamingProcessor:
                     if self.skipping_mode:
                         postfix_data += f", skipping_to={self.resume_from_id}"
                     elif self.skip_lines > 0 and self.lines_skipped < self.skip_lines:
-                        postfix_data += (
-                            f", skipping_lines={self.lines_skipped}/{self.skip_lines}"
-                        )
+                        postfix_data += f", skipping_lines={self.lines_skipped}/{self.skip_lines}"
                     elif self.last_processed_id:
                         postfix_data += f", last_id={self.last_processed_id}"
 
@@ -761,10 +754,10 @@ def main():
         print(f"⏭️ Will skip first {args.skip_lines:,} lines")
         if resume_from_id:
             print(
-                f"⚠️ Both --skip-lines and entity resume specified. Entity resume takes precedence."
+                "⚠️ Both --skip-lines and entity resume specified. Entity resume takes precedence."
             )
 
-    print(f"🎯 Configuration:")
+    print("🎯 Configuration:")
     print(f"   Reader threads: {args.reader_threads}")
     print(f"   Processor threads: {args.processor_threads}")
     print(f"   Block size: {args.block_size / (1024*1024):.1f}MB")
@@ -782,16 +775,12 @@ def main():
     # Open output files (append mode if resuming from any method)
     file_mode = "a" if (resume_from_id or args.skip_lines) else "w"
     if file_mode == "a":
-        print(f"📄 Output files will be opened in APPEND mode")
+        print("📄 Output files will be opened in APPEND mode")
     else:
-        print(f"📄 Output files will be opened in WRITE mode (overwrite)")
+        print("📄 Output files will be opened in WRITE mode (overwrite)")
 
-    inst_f = open(
-        args.output_instance, file_mode, encoding="utf-8", buffering=2 * 1024 * 1024
-    )
-    sub_f = open(
-        args.output_subclass, file_mode, encoding="utf-8", buffering=2 * 1024 * 1024
-    )
+    inst_f = open(args.output_instance, file_mode, encoding="utf-8", buffering=2 * 1024 * 1024)
+    sub_f = open(args.output_subclass, file_mode, encoding="utf-8", buffering=2 * 1024 * 1024)
 
     # Choose input source
     if args.stdin_json:
@@ -827,9 +816,9 @@ def main():
     elapsed = time.time() - start_time
     stats = processor.stats
 
-    print(f"\n" + "=" * 60)
-    print(f"🚀 PROCESSING COMPLETE")
-    print(f"=" * 60)
+    print("\n" + "=" * 60)
+    print("🚀 PROCESSING COMPLETE")
+    print("=" * 60)
     print(f"⏱️  Total time: {elapsed:.1f} seconds")
     print(f"📊 Lines processed: {stats['lines_read']:,}")
     print(f"📊 Entities processed: {stats['entities_processed']:,}")
@@ -840,33 +829,25 @@ def main():
         print(f"📍 Last processed entity: {processor.last_processed_id}")
 
     if elapsed > 0:
-        print(
-            f"🚄 Processing rate: {stats['entities_processed']/elapsed:.1f} entities/sec"
-        )
+        print(f"🚄 Processing rate: {stats['entities_processed']/elapsed:.1f} entities/sec")
         print(f"🚄 Line rate: {stats['lines_read']/elapsed:.1f} lines/sec")
 
-    print(f"📝 Output files:")
+    print("📝 Output files:")
     print(f"   Instance-of: {args.output_instance}")
     print(f"   Subclass-of: {args.output_subclass}")
     print(f"💾 Checkpoint file: {args.checkpoint_file}")
-    print(f"=" * 60)
+    print("=" * 60)
 
     if args.stdin_json:
         print(f"\n💡 Recommended usage (auto-optimized for {cpu_count} CPUs):")
-        print(
-            f"   pbzip2 -dc file.json.bz2 | python3 {os.path.basename(__file__)} --stdin-json"
-        )
-        print(f"\n💡 Manual tuning:")
+        print(f"   pbzip2 -dc file.json.bz2 | python3 {os.path.basename(__file__)} --stdin-json")
+        print("\n💡 Manual tuning:")
         if args.stdin_json:
-            print(f"   --reader-threads 1 (stdin is sequential)")
-            print(
-                f"   --processor-threads {min(18, max(6, cpu_count - 6))} (optimal for CPU)"
-            )
+            print("   --reader-threads 1 (stdin is sequential)")
+            print(f"   --processor-threads {min(18, max(6, cpu_count - 6))} (optimal for CPU)")
         else:
             print(f"   --reader-threads {max(2, cpu_count // 4)} (I/O intensive)")
-            print(
-                f"   --processor-threads {min(18, max(6, cpu_count - 6))} (CPU intensive)"
-            )
+            print(f"   --processor-threads {min(18, max(6, cpu_count - 6))} (CPU intensive)")
         print(f"   --block-size {16 * 1024 * 1024} (16MB for high throughput)")
 
 

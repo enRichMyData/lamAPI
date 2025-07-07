@@ -67,9 +67,9 @@ class PredicatesRetriever:
                 if subj in entity_objects:
                     for current_obj in sub_obj_mapping[subj]:
                         if current_obj in entity_objects[subj]["objects"]:
-                            wiki_response[f"{subj} {current_obj}"] = entity_objects[
-                                subj
-                            ]["objects"][current_obj]
+                            wiki_response[f"{subj} {current_obj}"] = entity_objects[subj][
+                                "objects"
+                            ][current_obj]
 
             final_response = wiki_response
 

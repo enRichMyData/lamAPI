@@ -350,8 +350,8 @@ def index_data(
                         batches = []
 
             pbar.update(1)
-        except Exception as e:
-            print(f"An error occurred while processing documents")
+        except Exception:
+            print("An error occurred while processing documents")
             print(item)
             traceback.print_exc()
 
@@ -447,7 +447,7 @@ def main():
                 print(f"Error: Invalid JSON in mapping file '{args.mapping_file}': {e}")
                 sys.exit(1)
 
-            print(f"Starting indexing process...")
+            print("Starting indexing process...")
             print(f"  Database: {args.db_name}")
             print(f"  Collection: {args.collection_name}")
             print(f"  Mapping file: {args.mapping_file}")
