@@ -316,7 +316,7 @@ class Lookup(BaseEndpoint):
                 fuzzy=fuzzy_value,
                 types=types_values or None,
                 kind=kind,
-                NERtype=ner_value,
+                ner_type=ner_value,
                 explicit_types=types_values or None,
                 extended_types=extended_types_values or None,
                 language=language,
