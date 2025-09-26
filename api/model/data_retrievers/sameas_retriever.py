@@ -7,7 +7,7 @@ class SameasRetriever:
             entities = []
         if kg not in self.database.get_supported_kgs():
             raise ValueError(f"Knowledge graph '{kg}' is not supported.")
-        
+
         query = {"entity": {"$in": entities}}
         return self.database.get_requested_collection("items", kg).find(query)
 
@@ -16,12 +16,12 @@ class SameasRetriever:
             entities = []
         if kg not in self.database.get_supported_kgs():
             raise ValueError(f"Knowledge graph '{kg}' is not supported.")
-        
+
         final_response = {}
         sameas_retrieved = self.get_sameas(entities=entities, kg=kg)
-        
+
         for item in sameas_retrieved:
             entity_id = item["entity"]
             final_response[entity_id] = item.get("URLs", [])
-        
+
         return final_response

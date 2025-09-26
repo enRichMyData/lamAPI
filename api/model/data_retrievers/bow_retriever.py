@@ -1,17 +1,17 @@
-import base64
-import nltk
-import pickle
 import gzip
-from nltk.tokenize import word_tokenize
+import pickle
+
+import nltk
 from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
 from pymongo import UpdateOne
 
 # Ensure NLTK resources are downloaded
-nltk.download('punkt', quiet=True)
-nltk.download('stopwords', quiet=True)
+nltk.download("punkt", quiet=True)
+nltk.download("stopwords", quiet=True)
 
 # Global stopwords to avoid reinitializing repeatedly
-stop_words = set(stopwords.words('english'))
+stop_words = set(stopwords.words("english"))
 
 
 class BOWRetriever:
@@ -30,7 +30,7 @@ class BOWRetriever:
     def normalize_text(self, text):
         """Normalize text by tokenizing, removing stopwords, and sorting tokens."""
         tokens = self.tokenize_text(text)
-        return ' '.join(sorted(tokens))
+        return " ".join(sorted(tokens))
 
     def tokenize_text(self, text):
         """Tokenize and clean the text."""
@@ -57,8 +57,13 @@ class BOWRetriever:
         query = {"text": normalized_text, "id": {"$in": entities}}
         results = list(cache_collection.find(query))
 
-        return {item["id"]: {"similarity_score": item["similarity_score"], "matched_words": item["matched_words"]}
-                for item in results}
+        return {
+            item["id"]: {
+                "similarity_score": item["similarity_score"],
+                "matched_words": item["matched_words"],
+            }
+            for item in results
+        }
 
     def update_cache(self, text, results, kg="wikidata"):
         """Update the cache with new results."""
@@ -71,11 +76,13 @@ class BOWRetriever:
         bulk_operations = [
             UpdateOne(
                 {"text": normalized_text, "id": entity_id},
-                {"$set": {
-                    "similarity_score": result["similarity_score"],
-                    "matched_words": result["matched_words"],
-                }},
-                upsert=True
+                {
+                    "$set": {
+                        "similarity_score": result["similarity_score"],
+                        "matched_words": result["matched_words"],
+                    }
+                },
+                upsert=True,
             )
             for entity_id, result in results.items()
         ]

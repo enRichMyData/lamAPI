@@ -1,8 +1,10 @@
-import traceback
 import logging
+import traceback
+
 from flask import Flask, request
 from flask_cors import CORS
 from flask_restx import Api, Resource, fields, reqparse
+from model.data_retrievers.bow_retriever import BOWRetriever
 from model.data_retrievers.column_analysis import ColumnAnalysis
 from model.data_retrievers.labels_retriever import LabelsRetriever
 from model.data_retrievers.literal_classifier import LiteralClassifier
@@ -10,15 +12,13 @@ from model.data_retrievers.literals_retriever import LiteralsRetriever
 from model.data_retrievers.lookup_retriever import LookupRetriever
 from model.data_retrievers.ner_recognizer import NERRecognizer
 from model.data_retrievers.objects_retriever import ObjectsRetriever
-from model.data_retrievers.bow_retriever import BOWRetriever
 from model.data_retrievers.predicates_retriever import PredicatesRetriever
-from model.data_retrievers.types_retriever import TypesRetriever
 from model.data_retrievers.sameas_retriever import SameasRetriever
 from model.data_retrievers.summary_retriever import SummaryRetriever
+from model.data_retrievers.types_retriever import TypesRetriever
+from model.database import Database
 from model.params_validator import ParamsValidator
 from model.utils import build_error
-from model.database import Database
-
 
 database = Database()
 
@@ -51,12 +51,24 @@ def init_services():
     namespaces = {
         "info": api.namespace("info"),
         "entity": api.namespace(
-            "entity", description="Services to perform computations and retrieve additional data about entities."
+            "entity",
+            description="Services to perform computations and retrieve additional data about entities.",
         ),
-        "lookup": api.namespace("lookup", description="Services to perform searches based on an input string."),
-        "sti": api.namespace("sti", description="Services to perform tasks related to Semantic Table Interpretation."),
-        "classify": api.namespace("classify", description="Services to perform string categorisation."),
-        "summary": api.namespace("summary", description="Services to get summary statiscs about the datasets."),
+        "lookup": api.namespace(
+            "lookup",
+            description="Services to perform searches based on an input string.",
+        ),
+        "sti": api.namespace(
+            "sti",
+            description="Services to perform tasks related to Semantic Table Interpretation.",
+        ),
+        "classify": api.namespace(
+            "classify", description="Services to perform string categorisation."
+        ),
+        "summary": api.namespace(
+            "summary",
+            description="Services to get summary statiscs about the datasets.",
+        ),
     }
 
     return app, api, namespaces
@@ -72,22 +84,48 @@ classify = namespaces["classify"]
 summary = namespaces["summary"]
 
 fields_predicates = info.model(
-    "Predicates", {"json": fields.List(fields.List(fields.String), example=[["Q30", "Q60"], ["Q166262", "Q25191"]])}
+    "Predicates",
+    {
+        "json": fields.List(
+            fields.List(fields.String), example=[["Q30", "Q60"], ["Q166262", "Q25191"]]
+        )
+    },
 )
 
-fields_objects = info.model("Objects", {"json": fields.List(fields.String, example=["Q30", "Q166262"])})
+fields_objects = info.model(
+    "Objects", {"json": fields.List(fields.String, example=["Q30", "Q166262"])}
+)
 
 # Define the input model with "json" at the root level
-fields_bow = info.model("Bow", {
-    "json": fields.Nested(info.model("JsonPayload", {
-        "text": fields.String(required=True, description="Text of the row to process", example="United States Washington D.C. 331000000 North America"),
-        "qids": fields.List(fields.String, required=True, description="List of candidate QIDs", example=["Q30", "Q166262"])
-    }))
-})
+fields_bow = info.model(
+    "Bow",
+    {
+        "json": fields.Nested(
+            info.model(
+                "JsonPayload",
+                {
+                    "text": fields.String(
+                        required=True,
+                        description="Text of the row to process",
+                        example="United States Washington D.C. 331000000 North America",
+                    ),
+                    "qids": fields.List(
+                        fields.String,
+                        required=True,
+                        description="List of candidate QIDs",
+                        example=["Q30", "Q166262"],
+                    ),
+                },
+            )
+        )
+    },
+)
 
 fields_sameas = info.model("SameAS", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
-fields_literals = info.model("Literals", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
+fields_literals = info.model(
+    "Literals", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
+)
 
 fields_types = info.model("Concepts", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
@@ -109,7 +147,9 @@ fields_literal_recognizer = info.model(
 
 fields_labels = info.model("Labels", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
 
-fields_rdf2vec = info.model("RDF2Vec", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
+fields_rdf2vec = info.model(
+    "RDF2Vec", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
+)
 
 fields_column_analysis = info.model(
     "ColumnAnalysis",
@@ -121,14 +161,14 @@ fields_column_analysis = info.model(
                 [
                     ["10", "100", "1000"],  # Column 1
                     ["12/11/1997", "26/08/1997", "14/05/2016"],  # Column 2
-                    ["London", "New York", "Paris"]  # Column 3
+                    ["London", "New York", "Paris"],  # Column 3
                 ],
                 # Table 2
                 [
                     ["Google", "Microsoft", "Apple"],  # Column 1
                     ["California", "Washington", "California"],  # Column 2
-                    ["1998", "1975", "1976"]  # Column 3
-                ]
+                    ["1998", "1975", "1976"],  # Column 3
+                ],
             ],
         )
     },
@@ -139,13 +179,17 @@ fields_ner = info.model(
     {
         "json": fields.List(
             fields.String,
-            example=["Albert Einstein was a German Scientist", "Alan Turing was an English Mathematician"],
+            example=[
+                "Albert Einstein was a German Scientist",
+                "Alan Turing was an English Mathematician",
+            ],
         )
     },
 )
 
 fields_cells = api.model(
-    "Cells", {"cells": fields.List(fields.String(), required=True, example=["Rome", "Paris", "Praga"])}
+    "Cells",
+    {"cells": fields.List(fields.String(), required=True, example=["Rome", "Paris", "Praga"])},
 )
 
 
@@ -156,14 +200,16 @@ class Info(Resource):
         info_obj = {
             "title": "LamAPI",
             "description": "This is an API which retrieves data about entities in different Knowledge Graphs and performs entity linking task.",
-            "license": {"name": "Apache 2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0.html"},
-            "version": "1.0.0"
+            "license": {
+                "name": "Apache 2.0",
+                "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
+            },
+            "version": "1.0.0",
         }
         return info_obj, 200
 
 
 class BaseEndpoint(Resource):
-
     def validate_and_get_json_format(self):
         try:
             data = request.get_json()["json"]
@@ -180,6 +226,8 @@ class BaseEndpoint(Resource):
         "limit": "The number of entities to be retrieved. The default value is 1000.",
         "kind": "Kind of Named Entity to be matched. Available values: <code>entity</code>, <code>disambiguation</code>, <code>type</code> and <code>predicate</code>.",
         "NERtype": "Type of Named Entity to be matched. Available values: <code>LOC</code>, <code>ORG</code>, <code>PERS</code> and <code>OTHERS</code>.",
+        "explicit_types": "Type or types belonging to Wikidata.",
+        "extended_types": "Type or types belonging to Wikidata extended from the explicit types thanks to the trnasitive closure.",
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
         "fuzzy": "Set this param to True if fuzzy search must be applied. Default is <code>False</code>.",
         "types": "Types to be matched in the Knowledge Graph as constraint in the retrieval. Add Types separeted by spaces. E.g. Scientist Philosopher Person",
@@ -187,7 +235,7 @@ class BaseEndpoint(Resource):
         "language": "Language to filter the labels. For example, <code>en</code> for English. Default is <code>None</code>.",
         "query": "Query to be used to test elastic search. Default is <code>None</code>.",
         "cache": "Set this param to True if you want to use the cached result of the search. Default is <code>True</code>.",
-        "token": "Private token to access the API."
+        "token": "Private token to access the API.",
     },
     description="Given a string as input, the endpoint performs a search in the specified Knowledge Graph.",
 )
@@ -199,6 +247,8 @@ class Lookup(BaseEndpoint):
         parser.add_argument("token", type=str, location="args")
         parser.add_argument("kind", type=str, location="args")
         parser.add_argument("NERtype", type=str, location="args")
+        parser.add_argument("explicit_types", type=str, location="args")
+        parser.add_argument("extended_types", type=str, location="args")
         parser.add_argument("kg", type=str, location="args")
         parser.add_argument("fuzzy", type=str, location="args")
         parser.add_argument("types", type=str, location="args")
@@ -216,13 +266,15 @@ class Lookup(BaseEndpoint):
         types = args["types"]
         kind = args["kind"]
         NERtype = args["NERtype"]
+        explicit_types = args["explicit_types"]
+        extended_types = args["extended_types"]
         language = args["language"]
         ids = args["ids"]
         query = args["query"]
         cache = args["cache"]
 
-        cache = cache in ["True", "true", None] 
-       
+        cache = cache in ["True", "true", None]
+
         token_is_valid, token_error = params_validator.validate_token(token)
         if not token_is_valid:
             return token_error
@@ -239,7 +291,7 @@ class Lookup(BaseEndpoint):
         limit_is_valid, limit_error_or_value = params_validator.validate_limit(limit)
         if not limit_is_valid:
             return limit_error_or_value
-        
+
         NERtype_is_valid, NERtype_error_or_value = params_validator.validate_NERtype(NERtype)
         if not NERtype_is_valid:
             return NERtype_error_or_value
@@ -256,10 +308,12 @@ class Lookup(BaseEndpoint):
                 types=types,
                 kind=kind,
                 NERtype=NERtype_error_or_value,
+                explicit_types=explicit_types,
+                extended_types=extended_types,
                 language=language,
                 ids=ids,
                 query=query,
-                cache=cache
+                cache=cache,
             )
         except Exception as e:
             print("Error", e, flush=True)
@@ -274,7 +328,7 @@ class Lookup(BaseEndpoint):
     description="Given a JSON array as input composed of Wikidata entities, the endpoint returns the associated TYPES for each entity.",
     params={
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "token": "Private token to access the APIs."
+        "token": "Private token to access the APIs.",
     },
 )
 class Types(BaseEndpoint):
@@ -393,7 +447,7 @@ class Bow(BaseEndpoint):
     description="Given a JSON array as input composed of Wikidata entities, the endpoint returns a list of PREDICATES between each pair of entities (SUBJECT and OBJECT).",
     params={
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "token": "Private token to access the APIs."
+        "token": "Private token to access the APIs.",
     },
 )
 class Predicates(BaseEndpoint):
@@ -430,7 +484,7 @@ class Predicates(BaseEndpoint):
     params={
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
         "lang": "Language to filter the labels.",
-        "token": "Private token to access the APIs."
+        "token": "Private token to access the APIs.",
     },
 )
 class Labels(BaseEndpoint):
@@ -447,19 +501,22 @@ class Labels(BaseEndpoint):
         kg = args["kg"]
         lang = args["lang"]
 
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
+        try:
+            token_is_valid, token_error = params_validator.validate_token(token)
+            kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
 
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return labels_retriever.get_labels_output(data, kg_error_or_value, lang)
+            if not token_is_valid:
+                return token_error
+            elif not kg_is_valid:
+                return kg_error_or_value
             else:
-                return build_error("Invalid Data", 400)
+                is_data_valid, data = super().validate_and_get_json_format()
+                if is_data_valid:
+                    return labels_retriever.get_labels_output(data, kg_error_or_value, lang)
+                else:
+                    return build_error("Invalid Data", 400)
+        except Exception as e:
+            return build_error(f"Error: {str(e)}", 400)
 
 
 @entity.route("/sameas")
@@ -589,8 +646,8 @@ class Literals(BaseEndpoint):
     description="Given a JSON array as input composed of a set of array of strings (cell content), the endpoint calculates, for each array, if the content represents named-entitites or literals.",
     params={
         "model_type": "Type of model to use. Values: 'fast' or 'accurate'. Default is 'fast'.",
-        "token": "Private token to access the APIs."
-},
+        "token": "Private token to access the APIs.",
+    },
 )
 class ColumnAnalysis(BaseEndpoint):
     @api.doc(body=fields_column_analysis)
@@ -694,9 +751,13 @@ class Summary(BaseEndpoint):
 
         # Implement the logic to retrieve Wikidata summary based on parameters
         if data_type == "objects":
-            results = summary_retriever.get_objects_summary(kg=kg_error_or_value, rank_order=rank_order, k=k)
+            results = summary_retriever.get_objects_summary(
+                kg=kg_error_or_value, rank_order=rank_order, k=k
+            )
         elif data_type == "literals":
-            results = summary_retriever.get_literals_summary(kg=kg_error_or_value, rank_order=rank_order, k=k)
+            results = summary_retriever.get_literals_summary(
+                kg=kg_error_or_value, rank_order=rank_order, k=k
+            )
         else:
             return build_error("Invalid data type. Use 'objects' or 'literals'.", 400)
 
