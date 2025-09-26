@@ -1,7 +1,6 @@
 import re
 
 import nltk
-from model.database import Database
 
 
 def editdistance(s1, s2):
@@ -29,22 +28,17 @@ def split_different_kg_entities(entities=[]):
     return final_splitting
 
 
-def get_kgs(kg_specified):
-    if kg_specified == "wikidata":
-        return Database.WIKIDATA
-    elif kg_specified == "dbpedia":
-        return Database.DBPEDIA
-    elif kg_specified == "crunchbase":
-        return Database.CRUNCHBASE
-
-
 def build_error(message, error_code, traceback=None):
     return {"error": message, "stacktrace": traceback}, error_code
 
 
 def clean_str(s):
-    s = s.lower()
-    return " ".join(s.split())
+    if s is None:
+        return ""
+    if not isinstance(s, str):
+        s = str(s)
+    normalized = s.casefold()
+    return " ".join(normalized.split())
 
 
 def compute_similarity_between_string(str1, str2, ngram=None):

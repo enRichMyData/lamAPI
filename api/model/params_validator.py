@@ -55,3 +55,24 @@ class ParamsValidator:
             return False, build_error("NERtype parameter is not valid", 400)
         else:
             return True, NERtype
+
+    @staticmethod
+    def parse_multi_values(values):
+        if values is None:
+            return []
+
+        if not isinstance(values, list):
+            values = [values]
+
+        parsed = []
+        for value in values:
+            if value is None:
+                continue
+            if isinstance(value, str):
+                for token in value.replace(",", " ").split():
+                    if token:
+                        parsed.append(token)
+            else:
+                parsed.append(str(value))
+
+        return parsed
