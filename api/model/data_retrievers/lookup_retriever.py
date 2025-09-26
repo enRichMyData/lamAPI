@@ -19,7 +19,7 @@ class LookupRetriever:
         fuzzy=False,
         types=None,
         kind=None,
-        NERtype=None,
+        ner_type=None,
         explicit_types=None,
         extended_types=None,
         language=None,
@@ -38,7 +38,7 @@ class LookupRetriever:
             fuzzy=fuzzy,
             types=types,
             kind=kind,
-            NERtype=NERtype,
+            ner_type=ner_type,
             explicit_types=explicit_types,
             extended_types=extended_types,
             language=language,
@@ -57,7 +57,7 @@ class LookupRetriever:
         fuzzy,
         types,
         kind,
-        NERtype,
+        ner_type,
         explicit_types,
         extended_types,
         language,
@@ -71,7 +71,7 @@ class LookupRetriever:
         types_values = self._normalise_filter_values(types, preserve_case=True)
         explicit_types_values = self._normalise_filter_values(explicit_types, preserve_case=True)
         extended_types_values = self._normalise_filter_values(extended_types, preserve_case=True)
-        ner_types_values = self._normalise_filter_values(NERtype, preserve_case=True)
+        ner_types_values = self._normalise_filter_values(ner_type, preserve_case=True)
         ner_type_value = ner_types_values[0] if ner_types_values else None
 
         types_cache_value = self._serialise_values(types_values)
@@ -104,7 +104,7 @@ class LookupRetriever:
                 fuzzy=fuzzy,
                 types=types_values,
                 kind=kind,
-                NERtype=ner_type_value,
+                ner_type=ner_type_value,
                 explicit_types=explicit_types_values,
                 extended_types=extended_types_values,
                 language=language,
@@ -201,7 +201,7 @@ class LookupRetriever:
             fuzzy=fuzzy,
             types=types_values,
             kind=kind,
-            NERtype=ner_type_value,
+            ner_type=ner_type_value,
             explicit_types=explicit_types_values,
             extended_types=extended_types_values,
             language=language,
@@ -520,7 +520,7 @@ class LookupRetriever:
         fuzzy=False,
         types=None,
         kind=None,
-        NERtype=None,
+        ner_type=None,
         explicit_types=None,
         extended_types=None,
         language=None,
@@ -552,8 +552,8 @@ class LookupRetriever:
         if kind:
             query_base["query"]["bool"]["filter"].append({"term": {"kind": kind}})
 
-        if NERtype:
-            ner_values = list(NERtype) if isinstance(NERtype, (list, tuple, set)) else [NERtype]
+        if ner_type:
+            ner_values = list(ner_type) if isinstance(ner_type, (list, tuple, set)) else [ner_type]
             if soft_filtering:
                 for value in ner_values:
                     query_base["query"]["bool"]["should"].append(
