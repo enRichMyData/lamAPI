@@ -33,12 +33,8 @@ def build_error(message, error_code, traceback=None):
 
 
 def clean_str(s):
-    if s is None:
-        return ""
-    if not isinstance(s, str):
-        s = str(s)
-    normalized = s.casefold()
-    return " ".join(normalized.split())
+    s = s.lower()
+    return " ".join(s.split())
 
 
 def compute_similarity_between_string(str1, str2, ngram=None):

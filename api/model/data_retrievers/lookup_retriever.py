@@ -3,7 +3,6 @@ import json
 
 from model.elastic import Elastic
 from model.utils import clean_str, compute_similarity_between_string, editdistance
-from pymongo import ReturnDocument
 
 
 class LookupRetriever:
@@ -14,7 +13,7 @@ class LookupRetriever:
     def search(
         self,
         name,
-        limit=128,
+        limit=1000,
         kg="wikidata",
         fuzzy=False,
         types=None,
@@ -29,7 +28,6 @@ class LookupRetriever:
         soft_filtering=False,
     ):
         self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
-        # Normalize name to ensure lowercase in order to avoid case-sensitive issues in the cache
         cleaned_name = clean_str(name)
         query_result = self._exec_query(
             cleaned_name,
@@ -74,12 +72,15 @@ class LookupRetriever:
         ner_types_values = self._normalise_filter_values(ner_type, preserve_case=True)
         ner_type_value = ner_types_values[0] if ner_types_values else None
 
-        types_cache_value = self._serialise_values(types_values)
-        explicit_types_cache_value = self._serialise_values(explicit_types_values)
-        extended_types_cache_value = self._serialise_values(extended_types_values)
-        ner_types_cache_value = ner_type_value
+        types_serialised = self._serialise_values(types_values)
+        explicit_serialised = self._serialise_values(explicit_types_values)
+        extended_serialised = self._serialise_values(extended_types_values)
 
-        requested_limit = limit
+        ids_serialised = ids
+        if ids is not None and not isinstance(ids, str):
+            normalised_ids = self._normalise_filter_values(ids, preserve_case=True)
+            ids_serialised = self._serialise_values(normalised_ids)
+
         ntoken_mention = len(cleaned_name.split(" "))
         length_mention = len(cleaned_name)
         ambiguity_mention, corrects_tokens = self._get_ambiguity_mention(cleaned_name, kg, limit)
@@ -123,26 +124,25 @@ class LookupRetriever:
             final_result = self._check_ids(
                 cleaned_name,
                 kg,
-                ids,
+                ids_serialised,
                 ntoken_mention,
                 length_mention,
                 ambiguity_mention,
                 corrects_tokens,
-                language,
                 final_result,
             )
             return final_result
 
         body = {
             "name": cleaned_name,
-            "limit": {"$gte": requested_limit},
+            "limit": {"$gte": limit},
             "kg": kg,
             "fuzzy": fuzzy,
-            "types": types_cache_value,
+            "types": types_serialised,
             "kind": kind,
-            "NERtype": ner_types_cache_value,
-            "explicit_types": explicit_types_cache_value,
-            "extended_types": extended_types_cache_value,
+            "NERtype": ner_type_value,
+            "explicit_types": explicit_serialised,
+            "extended_types": extended_serialised,
             "language": language,
             "soft_filtering": soft_filtering,
         }
@@ -150,51 +150,25 @@ class LookupRetriever:
         result = self.candidate_cache_collection.find_one_and_update(
             body,
             {"$set": {"lastAccessed": datetime.datetime.now(datetime.timezone.utc)}},
-            sort=[("limit", -1)],
-            return_document=ReturnDocument.BEFORE,
         )
 
         if result is not None:
-            cached_candidates = result.get("candidates", [])
-            cached_limit = result.get("limit", requested_limit)
-
-            enriched_candidates = self._check_ids(
+            final_result = result["candidates"][0:limit]
+            limit = result["limit"]
+            result = self._check_ids(
                 cleaned_name,
                 kg,
-                ids,
+                ids_serialised,
                 ntoken_mention,
                 length_mention,
                 ambiguity_mention,
                 corrects_tokens,
-                language,
-                list(cached_candidates),
+                final_result,
             )
-
-            if enriched_candidates is None:
-                enriched_candidates = list(cached_candidates)
-
-            if enriched_candidates != cached_candidates:
-                self.add_or_update_cache(body, enriched_candidates, cached_limit)
-
-            response_candidates = enriched_candidates[0:requested_limit]
-
-            if ids:
-                requested_ids_set = set(self._normalise_filter_values(ids, preserve_case=True))
-                returned_ids = {
-                    candidate.get("id")
-                    for candidate in response_candidates
-                    if candidate.get("id") is not None
-                }
-                missing_ids = requested_ids_set - returned_ids
-                if missing_ids:
-                    additional_candidates = [
-                        candidate
-                        for candidate in enriched_candidates
-                        if candidate.get("id") in missing_ids
-                    ]
-                    response_candidates.extend(additional_candidates)
-
-            return response_candidates
+            if result is not None:
+                final_result = result
+                self.add_or_update_cache(body, final_result, limit)
+            return final_result
 
         query = self.create_query(
             cleaned_name,
@@ -222,15 +196,14 @@ class LookupRetriever:
         final_result = self._check_ids(
             cleaned_name,
             kg,
-            ids,
+            ids_serialised,
             ntoken_mention,
             length_mention,
             ambiguity_mention,
             corrects_tokens,
-            language,
             final_result,
         )
-        self.add_or_update_cache(body, final_result, requested_limit)
+        self.add_or_update_cache(body, final_result, limit)
 
         return final_result
 
@@ -267,31 +240,33 @@ class LookupRetriever:
         ntoken_mention,
         length_mention,
     ):
-        type_ids_set = set()
-        normalised_types_per_entity = []
-
-        for entity in result:
-            raw_types = entity.get("types", [])
-            current_type_ids = []
-
+        def _types_to_tokens(raw_types):
             if isinstance(raw_types, str):
-                current_type_ids = [token for token in raw_types.split() if token]
-            elif isinstance(raw_types, list):
+                return [token for token in raw_types.split(" ") if token]
+            if isinstance(raw_types, list):
+                tokens = []
                 for item in raw_types:
-                    if isinstance(item, dict) and item.get("id"):
-                        current_type_ids.append(item["id"])
+                    if isinstance(item, dict):
+                        type_id = item.get("id")
+                        if type_id:
+                            tokens.append(type_id)
                     elif isinstance(item, str):
-                        current_type_ids.append(item)
-            elif raw_types:
-                current_type_ids = [str(raw_types)]
+                        tokens.extend(token for token in item.split(" ") if token)
+                return tokens
+            if raw_types is None:
+                return []
+            return [str(raw_types)]
 
-            type_ids_set.update(current_type_ids)
-            normalised_types_per_entity.append(current_type_ids)
-
-        types_id_to_name = self._get_types_id_to_name(list(type_ids_set), kg)
+        ids = set()
+        normalised_entity_types = []
+        for entity in result:
+            tokens = _types_to_tokens(entity.get("types", ""))
+            normalised_entity_types.append(tokens)
+            ids.update(tokens)
+        types_id_to_name = self._get_types_id_to_name(list(ids), kg)
 
         history = {}
-        for entity, entity_type_ids in zip(result, normalised_types_per_entity):
+        for entity, entity_types_tokens in zip(result, normalised_entity_types):
             id_entity = entity["id"]
             label_clean = clean_str(entity["name"])
             ed_score = round(editdistance(label_clean, name), 2)
@@ -303,7 +278,7 @@ class LookupRetriever:
                 "description": entity.get("description", ""),
                 "types": [
                     {"id": id_type, "name": types_id_to_name.get(id_type, id_type)}
-                    for id_type in entity_type_ids
+                    for id_type in entity_types_tokens
                 ],
                 "kind": entity.get("kind", None),
                 "NERtype": entity.get("NERtype", None),
@@ -376,42 +351,33 @@ class LookupRetriever:
         length_mention,
         ambiguity_mention,
         corrects_tokens,
-        language,
         result,
     ):
         if ids is None:
             return result
 
         result = result or []
-        requested_ids = self._normalise_filter_values(ids, preserve_case=True)
+        ids_list = self._normalise_filter_values(ids, preserve_case=True)
 
-        if not requested_ids:
+        for item in result:
+            if item["id"] in ids_list:
+                ids_list.remove(item["id"])
+
+        if len(ids_list) == 0:
             return result
 
-        found_ids = {item.get("id") for item in result if item.get("id") is not None}
-        remaining_ids = [entity_id for entity_id in requested_ids if entity_id not in found_ids]
-
-        if not remaining_ids:
-            return result
-
-        merged_results = list(result)
-
-        for entity_id in remaining_ids:
-            query = self.create_ids_query(entity_id, language=language)
+        fetched_candidates = []
+        for entity_id in ids_list:
+            query = self.create_ids_query(entity_id)
             fetched = self.elastic_retriever.search(query, kg, limit=1)
-
-            if not fetched:
-                alias_query = self.create_ids_query(entity_id, language=language, allow_alias=True)
-                fetched = self.elastic_retriever.search(alias_query, kg, limit=1)
-
             if fetched:
-                merged_results.extend(fetched)
+                fetched_candidates.extend(fetched)
 
-        if len(merged_results) == len(result):
+        if not fetched_candidates:
             return result
 
-        final_result = self._get_final_candidates_list(
-            merged_results,
+        result_by_id = self._get_final_candidates_list(
+            fetched_candidates,
             name,
             kg,
             ambiguity_mention,
@@ -419,8 +385,8 @@ class LookupRetriever:
             ntoken_mention,
             length_mention,
         )
-
-        return final_result
+        new_result = result + result_by_id
+        return new_result
 
     def _get_types_id_to_name(self, ids, kg):
         items_collection = self.database.get_requested_collection("items", kg=kg)
@@ -436,45 +402,31 @@ class LookupRetriever:
         return query
 
     # Create a query to search for a list of ids (string separated by space)
-    def create_ids_query(self, ids, language=None, allow_alias=False):
+    def create_ids_query(self, ids, language="en", allow_alias=False):
         ids_list = self._normalise_filter_values(ids, preserve_case=True)
         if not ids_list:
             raise ValueError("Unable to build id query without ids")
 
+        must_clauses = []
         if len(ids_list) == 1:
-            id_value = ids_list[0]
-            query = {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"match": {"id": id_value}},
-                        ]
-                    }
-                },
-                "_source": {"excludes": ["language"]},
-            }
-            if language:
-                query["query"]["bool"]["must"].append({"match": {"language": language}})
-            if not allow_alias:
-                query["query"]["bool"]["must"].append({"match": {"is_alias": False}})
-            query["size"] = 1
-            return query
+            must_clauses.append({"match": {"id": ids_list[0]}})
+        else:
+            must_clauses.append({"terms": {"id": ids_list}})
+
+        if language:
+            must_clauses.append({"match": {"language": language}})
+        if not allow_alias:
+            must_clauses.append({"match": {"is_alias": False}})
 
         query = {
             "query": {
                 "bool": {
-                    "filter": [
-                        {"terms": {"id": ids_list}},
-                    ]
+                    "must": must_clauses,
                 }
             },
             "_source": {"excludes": ["language"]},
+            "size": len(ids_list),
         }
-        if language:
-            query["query"]["bool"]["filter"].append({"term": {"language": language}})
-        if not allow_alias:
-            query["query"]["bool"]["filter"].append({"term": {"is_alias": False}})
-        query["size"] = len(ids_list)
         return query
 
     @staticmethod
@@ -500,13 +452,22 @@ class LookupRetriever:
         for token in tokens:
             if not token:
                 continue
-            token = token.strip()
+            cleaned = token.strip()
+            if not cleaned:
+                continue
             if not preserve_case:
-                token = token.casefold()
-            normalised_tokens.append(token)
+                cleaned = cleaned.casefold()
+            normalised_tokens.append(cleaned)
 
-        normalised_tokens = [token for token in normalised_tokens if token]
-        return sorted(set(normalised_tokens))
+        # Preserve deterministic order without duplicates by sorting tokens
+        seen = set()
+        unique_tokens = []
+        for token in normalised_tokens:
+            if token in seen:
+                continue
+            seen.add(token)
+            unique_tokens.append(token)
+        return sorted(unique_tokens)
 
     @staticmethod
     def _serialise_values(values):
@@ -533,9 +494,6 @@ class LookupRetriever:
             "_source": {"excludes": ["language"]},
         }
 
-        if explicit_types is None and types is not None:
-            explicit_types = types
-
         penalty_functions = []
 
         # Add name to the query
@@ -548,63 +506,86 @@ class LookupRetriever:
                 {"match": {"name": {"query": name, "boost": 2}}}
             )
 
+        # Normalise incoming filters into token lists
+        def ensure_list(value):
+            if value is None:
+                return []
+            if isinstance(value, str):
+                return [token for token in value.split() if token]
+            if isinstance(value, (list, tuple, set)):
+                return [str(token) for token in value if token]
+            return [str(value)]
+
+        types_tokens = ensure_list(types)
+        explicit_tokens = ensure_list(explicit_types)
+        extended_tokens = ensure_list(extended_types)
+        ner_tokens = ensure_list(ner_type)
+
+        # Add types filter if provided
+        if types_tokens:
+            types_match_value = " ".join(types_tokens)
+            if types_match_value:
+                query_base["query"]["bool"]["must"].append({"match": {"types": types_match_value}})
+
         # Add kind filter if provided
         if kind:
             query_base["query"]["bool"]["filter"].append({"term": {"kind": kind}})
 
-        if ner_type:
-            ner_values = list(ner_type) if isinstance(ner_type, (list, tuple, set)) else [ner_type]
+        # Handle NER soft/hard filtering
+        if ner_tokens:
             if soft_filtering:
-                for value in ner_values:
+                for value in ner_tokens:
                     query_base["query"]["bool"]["should"].append(
                         {"term": {"NERtype": {"value": value, "boost": 2.0}}}
                     )
             else:
-                if len(ner_values) == 1:
+                if len(ner_tokens) == 1:
                     query_base["query"]["bool"]["filter"].append(
-                        {"term": {"NERtype": ner_values[0]}}
+                        {"term": {"NERtype": ner_tokens[0]}}
                     )
                 else:
                     query_base["query"]["bool"]["filter"].append(
-                        {"terms": {"NERtype": ner_values}}
+                        {"terms": {"NERtype": ner_tokens}}
                     )
 
-        if explicit_types:
+        # Handle explicit types
+        if explicit_tokens:
             if soft_filtering:
-                for value in explicit_types:
+                for value in explicit_tokens:
                     query_base["query"]["bool"]["should"].append(
                         {"term": {"explicit_types": {"value": value, "boost": 1.5}}}
                     )
                 penalty_functions.append(
                     {
                         "filter": {
-                            "bool": {"must_not": [{"terms": {"explicit_types": explicit_types}}]}
+                            "bool": {"must_not": [{"terms": {"explicit_types": explicit_tokens}}]}
                         },
                         "weight": 0.1,
                     }
                 )
             else:
                 query_base["query"]["bool"]["filter"].append(
-                    {"terms": {"explicit_types": explicit_types}}
+                    {"terms": {"explicit_types": explicit_tokens}}
                 )
 
-        if extended_types:
+        # Handle extended types
+        if extended_tokens:
             if soft_filtering:
-                for value in extended_types:
+                for value in extended_tokens:
                     query_base["query"]["bool"]["should"].append(
                         {"term": {"extended_types": {"value": value, "boost": 1.2}}}
                     )
                 penalty_functions.append(
                     {
                         "filter": {
-                            "bool": {"must_not": [{"terms": {"extended_types": extended_types}}]}
+                            "bool": {"must_not": [{"terms": {"extended_types": extended_tokens}}]}
                         },
                         "weight": 0.2,
                     }
                 )
             else:
                 query_base["query"]["bool"]["filter"].append(
-                    {"terms": {"extended_types": extended_types}}
+                    {"terms": {"extended_types": extended_tokens}}
                 )
 
         # Add language filter if provided
