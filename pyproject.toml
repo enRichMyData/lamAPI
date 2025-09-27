@@ -54,7 +54,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*"]
+include = ["lamapi*"]
 
 [tool.ruff]
 line-length = 99

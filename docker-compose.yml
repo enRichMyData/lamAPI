@@ -7,12 +7,13 @@ services:
     container_name: lamapi_api
     env_file:
       - ./.env
-    command: bash -c "gunicorn -w $THREADS -k gevent -b 0.0.0.0:5000 server:app --timeout 300 --reload --log-level debug"
+    command: bash -c "gunicorn -w $THREADS -k gevent -b 0.0.0.0:5000 app.server:app --timeout 300 --reload --log-level debug"
     ports:
       - "${LAMAPI_PORT}:5000"
     restart: always
     volumes:
-      - ./api/:/app
+      - ./app/:/app/api
+      - ./lamapi/:/app/lamapi
       - ./scripts/:/scripts
 
   mongo:

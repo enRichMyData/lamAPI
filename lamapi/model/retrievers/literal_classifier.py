@@ -1,4 +1,4 @@
-from model.literal_recognizer import LiteralRecognizer
+from lamapi.model.literal_recognizer import LiteralRecognizer
 
 
 class LiteralClassifier:

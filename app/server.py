@@ -1,45 +1,37 @@
 import logging
 import traceback
+from pathlib import Path
 
 from flask import Flask, request
 from flask_cors import CORS
 from flask_restx import Api, Resource, fields, reqparse
-from model.data_retrievers.bow_retriever import BOWRetriever
-from model.data_retrievers.column_analysis import ColumnAnalysis
-from model.data_retrievers.labels_retriever import LabelsRetriever
-from model.data_retrievers.literal_classifier import LiteralClassifier
-from model.data_retrievers.literals_retriever import LiteralsRetriever
-from model.data_retrievers.lookup_retriever import LookupRetriever
-from model.data_retrievers.ner_recognizer import NERRecognizer
-from model.data_retrievers.objects_retriever import ObjectsRetriever
-from model.data_retrievers.predicates_retriever import PredicatesRetriever
-from model.data_retrievers.sameas_retriever import SameasRetriever
-from model.data_retrievers.summary_retriever import SummaryRetriever
-from model.data_retrievers.types_retriever import TypesRetriever
-from model.database import Database
-from model.params_validator import ParamsValidator
-from model.utils import build_error
 
-database = Database()
+from lamapi import LamAPI
+from lamapi.model.utils import build_error
+
+lamapi_service = LamAPI()
+
+database = lamapi_service.database
 
 # instance objects
-params_validator = ParamsValidator()
-type_retriever = TypesRetriever(database)
-objects_retriever = ObjectsRetriever(database)
-bow_retriever = BOWRetriever(database)
-predicates_retriever = PredicatesRetriever(database)
-labels_retriever = LabelsRetriever(database)
-literal_classifier = LiteralClassifier()
-literals_retriever = LiteralsRetriever(database)
-sameas_retriever = SameasRetriever(database)
-lookup_retriever = LookupRetriever(database)
-column_analysis_classifier = ColumnAnalysis()
-ner_recognition = NERRecognizer()
-summary_retriever = SummaryRetriever(database)
+params_validator = lamapi_service.params_validator
+type_retriever = lamapi_service.types_retriever
+objects_retriever = lamapi_service.objects_retriever
+bow_retriever = lamapi_service.bow_retriever
+predicates_retriever = lamapi_service.predicates_retriever
+labels_retriever = lamapi_service.labels_retriever
+literal_classifier = lamapi_service.literal_classifier
+literals_retriever = lamapi_service.literals_retriever
+sameas_retriever = lamapi_service.sameas_retriever
+lookup_retriever = lamapi_service.lookup_retriever
+column_analysis_classifier = lamapi_service.column_analysis_classifier
+ner_recognition = lamapi_service.ner_recognizer
+summary_retriever = lamapi_service.summary_retriever
 
 
 def init_services():
-    with open("data.txt") as f:
+    data_path = Path(__file__).resolve().parent / "data.txt"
+    with data_path.open() as f:
         description = f.read()
     app = Flask("LamAPI")
     CORS(app)

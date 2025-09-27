@@ -1,8 +1,8 @@
 import datetime
 import json
 
-from model.elastic import Elastic
-from model.utils import clean_str, compute_similarity_between_string, editdistance
+from lamapi.model.elastic import Elastic
+from lamapi.model.utils import clean_str, compute_similarity_between_string, editdistance
 
 
 class LookupRetriever:
