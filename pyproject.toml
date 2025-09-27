@@ -39,7 +39,8 @@ dependencies = [
   "column-classifier",
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.29.0",
-  "jsonargparse>=4.27.0"
+  "jsonargparse>=4.27.0",
+  "pydantic-settings>=2.0.3"
 ]
 
 [project.scripts]
@@ -60,7 +61,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["lamapi*"]
+include = ["lamapi*", "app*"]
 
 [tool.ruff]
 line-length = 99

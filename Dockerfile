@@ -6,7 +6,7 @@ WORKDIR /app
 # Copy project metadata and source code needed for installation
 COPY pyproject.toml ./
 COPY lamapi ./lamapi
-COPY app ./api
+COPY app ./app
 
 RUN pip install --no-cache-dir -e .
 
