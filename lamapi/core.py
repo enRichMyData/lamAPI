@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from lamapi.database import Database
+from lamapi.recognizers.ner_recognizer import NERRecognizer
 from lamapi.retrievers.bow_retriever import BOWRetriever
 from lamapi.retrievers.column_analysis import ColumnAnalysis
 from lamapi.retrievers.labels_retriever import LabelsRetriever
 from lamapi.retrievers.literal_classifier import LiteralClassifier
 from lamapi.retrievers.literals_retriever import LiteralsRetriever
 from lamapi.retrievers.lookup_retriever import LookupRetriever
-from lamapi.retrievers.ner_recognizer import NERRecognizer
 from lamapi.retrievers.objects_retriever import ObjectsRetriever
 from lamapi.retrievers.predicates_retriever import PredicatesRetriever
 from lamapi.retrievers.sameas_retriever import SameasRetriever

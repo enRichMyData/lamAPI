@@ -6,7 +6,6 @@ from .labels_retriever import LabelsRetriever
 from .literal_classifier import LiteralClassifier
 from .literals_retriever import LiteralsRetriever
 from .lookup_retriever import LookupRetriever
-from .ner_recognizer import NERRecognizer
 from .objects_retriever import ObjectsRetriever
 from .predicates_retriever import PredicatesRetriever
 from .sameas_retriever import SameasRetriever
@@ -20,7 +19,6 @@ __all__ = [
     "LiteralClassifier",
     "LiteralsRetriever",
     "LookupRetriever",
-    "NERRecognizer",
     "ObjectsRetriever",
     "PredicatesRetriever",
     "SameasRetriever",
