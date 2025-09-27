@@ -16,9 +16,20 @@ class Elastic:
         retry = 0
         while retry < max_retry:
             try:
+                hosts = [
+                    {
+                        "host": str(ELASTIC_ENDPOINT),
+                        "port": int(ELASTIC_PORT),
+                        "scheme": "http",
+                    }
+                ]
                 es = Elasticsearch(
-                    hosts=f"http://{ELASTIC_ENDPOINT}:{ELASTIC_PORT}",
-                    request_timeout=60,
+                    hosts=hosts,
+                    request_timeout=self._timeout,
+                    retry_on_timeout=True,
+                    max_retries=5,
+                    connections_per_node=20,
+                    http_compress=True,
                 )
                 if es.ping():
                     print("Connected to Elasticsearch")

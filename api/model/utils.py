@@ -1,7 +1,6 @@
 import re
 
 import nltk
-from model.database import Database
 
 
 def editdistance(s1, s2):
@@ -27,15 +26,6 @@ def split_different_kg_entities(entities=[]):
         final_splitting[recognize_entity(entity)].append(entity)
 
     return final_splitting
-
-
-def get_kgs(kg_specified):
-    if kg_specified == "wikidata":
-        return Database.WIKIDATA
-    elif kg_specified == "dbpedia":
-        return Database.DBPEDIA
-    elif kg_specified == "crunchbase":
-        return Database.CRUNCHBASE
 
 
 def build_error(message, error_code, traceback=None):

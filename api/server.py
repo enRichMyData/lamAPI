@@ -225,13 +225,13 @@ class BaseEndpoint(Resource):
         "name": "Name to look for (e.g., Batman Begins).",
         "limit": "The number of entities to be retrieved. The default value is 1000.",
         "kind": "Kind of Named Entity to be matched. Available values: <code>entity</code>, <code>disambiguation</code>, <code>type</code> and <code>predicate</code>.",
-        "NERtype": "Type of Named Entity to be matched. Available values: <code>LOC</code>, <code>ORG</code>, <code>PERS</code> and <code>OTHERS</code>.",
-        "explicit_types": "Type or types belonging to Wikidata.",
-        "extended_types": "Type or types belonging to Wikidata extended from the explicit types thanks to the trnasitive closure.",
         "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
         "fuzzy": "Set this param to True if fuzzy search must be applied. Default is <code>False</code>.",
-        "types": "Types to be matched in the Knowledge Graph as constraint in the retrieval. Add Types separeted by spaces. E.g. Scientist Philosopher Person",
-        "ids": "Ids of the entity",
+        "softFiltering": "Set to True to apply soft filtering (boosting) instead of hard filtering on NER and type constraints. Default is <code>False</code>.",
+        "types": "Types to be matched in the Knowledge Graph as constraint in the retrieval. Provide space-separated IDs or repeat the parameter.",
+        "extendedTypes": "Types derived from transitive closure, used for soft filtering. Provide space-separated IDs or repeat the parameter.",
+        "nerType": "Type of Named Entity to be matched. Available values: <code>LOC</code>, <code>ORG</code>, <code>PERS</code> and <code>OTHERS</code>.",
+        "ids": "Ids of the entity. Provide space-separated IDs or repeat the parameter.",
         "language": "Language to filter the labels. For example, <code>en</code> for English. Default is <code>None</code>.",
         "query": "Query to be used to test elastic search. Default is <code>None</code>.",
         "cache": "Set this param to True if you want to use the cached result of the search. Default is <code>True</code>.",
@@ -246,13 +246,13 @@ class Lookup(BaseEndpoint):
         parser.add_argument("limit", type=int, location="args")
         parser.add_argument("token", type=str, location="args")
         parser.add_argument("kind", type=str, location="args")
-        parser.add_argument("NERtype", type=str, location="args")
-        parser.add_argument("explicit_types", type=str, location="args")
-        parser.add_argument("extended_types", type=str, location="args")
+        parser.add_argument("nerType", type=str, location="args")
+        parser.add_argument("types", action="append", location="args")
+        parser.add_argument("extendedTypes", action="append", location="args")
         parser.add_argument("kg", type=str, location="args")
         parser.add_argument("fuzzy", type=str, location="args")
-        parser.add_argument("types", type=str, location="args")
-        parser.add_argument("ids", type=str, location="args")
+        parser.add_argument("softFiltering", type=str, location="args")
+        parser.add_argument("ids", action="append", location="args")
         parser.add_argument("language", type=str, location="args")
         parser.add_argument("query", type=str, location="args")
         parser.add_argument("cache", type=str, location="args")
@@ -263,13 +263,13 @@ class Lookup(BaseEndpoint):
         token = args["token"]
         kg = args["kg"]
         fuzzy = args["fuzzy"]
-        types = args["types"]
+        soft_filtering = args["softFiltering"]
+        types_raw = args["types"]
+        extended_types_raw = args["extendedTypes"]
         kind = args["kind"]
-        NERtype = args["NERtype"]
-        explicit_types = args["explicit_types"]
-        extended_types = args["extended_types"]
+        ner_type = args["nerType"]
         language = args["language"]
-        ids = args["ids"]
+        ids_raw = args["ids"]
         query = args["query"]
         cache = args["cache"]
 
@@ -284,6 +284,11 @@ class Lookup(BaseEndpoint):
         if not is_fuzzy_valid:
             return fuzzy_value
 
+        soft_filter_is_valid, soft_filter_value = params_validator.validate_bool(soft_filtering)
+
+        if not soft_filter_is_valid:
+            return soft_filter_value
+
         kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
         if not kg_is_valid:
             return kg_error_or_value
@@ -292,9 +297,13 @@ class Lookup(BaseEndpoint):
         if not limit_is_valid:
             return limit_error_or_value
 
-        NERtype_is_valid, NERtype_error_or_value = params_validator.validate_NERtype(NERtype)
-        if not NERtype_is_valid:
-            return NERtype_error_or_value
+        ner_is_valid, ner_value = params_validator.validate_NERtype(ner_type)
+        if not ner_is_valid:
+            return ner_value
+
+        types_values = params_validator.parse_multi_values(types_raw)
+        extended_types_values = params_validator.parse_multi_values(extended_types_raw)
+        ids_values = params_validator.parse_multi_values(ids_raw)
 
         if name is None:
             return build_error("Name is required", 400)
@@ -305,15 +314,15 @@ class Lookup(BaseEndpoint):
                 limit=limit_error_or_value,
                 kg=kg_error_or_value,
                 fuzzy=fuzzy_value,
-                types=types,
+                types=types_values or None,
                 kind=kind,
-                NERtype=NERtype_error_or_value,
-                explicit_types=explicit_types,
-                extended_types=extended_types,
+                ner_type=ner_value,
+                extended_types=extended_types_values or None,
                 language=language,
-                ids=ids,
+                ids=ids_values or None,
                 query=query,
                 cache=cache,
+                soft_filtering=soft_filter_value,
             )
         except Exception as e:
             print("Error", e, flush=True)
