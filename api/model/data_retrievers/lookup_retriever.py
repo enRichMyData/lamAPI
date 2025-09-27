@@ -19,7 +19,6 @@ class LookupRetriever:
         types=None,
         kind=None,
         ner_type=None,
-        explicit_types=None,
         extended_types=None,
         language=None,
         ids=None,
@@ -37,7 +36,6 @@ class LookupRetriever:
             types=types,
             kind=kind,
             ner_type=ner_type,
-            explicit_types=explicit_types,
             extended_types=extended_types,
             language=language,
             ids=ids,
@@ -56,7 +54,6 @@ class LookupRetriever:
         types,
         kind,
         ner_type,
-        explicit_types,
         extended_types,
         language,
         ids,
@@ -67,13 +64,12 @@ class LookupRetriever:
         self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
 
         types_values = self._normalise_filter_values(types, preserve_case=True)
-        explicit_types_values = self._normalise_filter_values(explicit_types, preserve_case=True)
         extended_types_values = self._normalise_filter_values(extended_types, preserve_case=True)
         ner_types_values = self._normalise_filter_values(ner_type, preserve_case=True)
         ner_type_value = ner_types_values[0] if ner_types_values else None
 
         types_serialised = self._serialise_values(types_values)
-        explicit_serialised = self._serialise_values(explicit_types_values)
+        explicit_serialised = types_serialised
         extended_serialised = self._serialise_values(extended_types_values)
 
         ids_serialised = ids
@@ -106,7 +102,6 @@ class LookupRetriever:
                 types=types_values,
                 kind=kind,
                 ner_type=ner_type_value,
-                explicit_types=explicit_types_values,
                 extended_types=extended_types_values,
                 language=language,
                 soft_filtering=soft_filtering,
@@ -176,7 +171,6 @@ class LookupRetriever:
             types=types_values,
             kind=kind,
             ner_type=ner_type_value,
-            explicit_types=explicit_types_values,
             extended_types=extended_types_values,
             language=language,
             soft_filtering=soft_filtering,
@@ -482,7 +476,6 @@ class LookupRetriever:
         types=None,
         kind=None,
         ner_type=None,
-        explicit_types=None,
         extended_types=None,
         language=None,
         soft_filtering=False,
@@ -517,15 +510,10 @@ class LookupRetriever:
             return [str(value)]
 
         types_tokens = ensure_list(types)
-        explicit_tokens = ensure_list(explicit_types)
         extended_tokens = ensure_list(extended_types)
         ner_tokens = ensure_list(ner_type)
 
-        # Add types filter if provided
-        if types_tokens:
-            types_match_value = " ".join(types_tokens)
-            if types_match_value:
-                query_base["query"]["bool"]["must"].append({"match": {"types": types_match_value}})
+        explicit_tokens = list(types_tokens)
 
         # Add kind filter if provided
         if kind:
