@@ -36,8 +36,12 @@ dependencies = [
   "pandas",
   "SPARQLWRapper",
   "python-dotenv",
-  "column-classifier"
+  "column-classifier",
+  "jsonargparse>=4.27.0"
 ]
+
+[project.scripts]
+lamapi = "lamapi.cli:main"
 
 [project.optional-dependencies]
 dev = [
