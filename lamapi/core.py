@@ -94,8 +94,10 @@ class LamAPI:
     def classify_literals(self, literals: Sequence[str]) -> Dict[str, Dict[str, Any]]:
         return self.literal_classifier.classifiy_literal(literals)
 
-    def classify_columns(self, tables: Sequence[Sequence[Sequence[str]]]) -> List[Dict[str, Any]]:
-        return self.column_analysis_classifier.classify_columns(tables)
+    def classify_columns(
+        self, tables: Sequence[Sequence[Sequence[str]]], model_type: str = "fast"
+    ) -> List[Dict[str, Any]]:
+        return self.column_analysis_classifier.classify_columns(tables, model_type=model_type)
 
     def recognize_entities(self, text_list: Sequence[str]) -> Dict[str, Any]:
         return self.ner_recognizer.recognize_entities(text_list)

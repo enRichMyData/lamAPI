@@ -1,765 +1,525 @@
+import asyncio
 import logging
+import os
 import traceback
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from flask import Flask, request
-from flask_cors import CORS
-from flask_restx import Api, Resource, fields, reqparse
+from fastapi import APIRouter, Body, FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from lamapi import LamAPI
 from lamapi.model.utils import build_error
 
-lamapi_service = LamAPI()
+logger = logging.getLogger("lamapi.server")
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+MAX_QUEUE_SIZE = int(os.getenv("LAMAPI_QUEUE_SIZE", "256"))
+MAX_WORKERS = int(os.getenv("LAMAPI_WORKERS", "4"))
+JOB_RETRIES = int(os.getenv("LAMAPI_JOB_RETRIES", "3"))
+RETRY_BACKOFF = float(os.getenv("LAMAPI_RETRY_BACKOFF", "0.5"))
+
+
+@dataclass
+class Job:
+    func: Callable[..., Any]
+    args: Sequence[Any]
+    kwargs: Dict[str, Any]
+    future: asyncio.Future
+
+
+lamapi_service = LamAPI()
 database = lamapi_service.database
 
-# instance objects
-params_validator = lamapi_service.params_validator
-type_retriever = lamapi_service.types_retriever
-objects_retriever = lamapi_service.objects_retriever
-bow_retriever = lamapi_service.bow_retriever
-predicates_retriever = lamapi_service.predicates_retriever
-labels_retriever = lamapi_service.labels_retriever
-literal_classifier = lamapi_service.literal_classifier
-literals_retriever = lamapi_service.literals_retriever
-sameas_retriever = lamapi_service.sameas_retriever
-lookup_retriever = lamapi_service.lookup_retriever
-column_analysis_classifier = lamapi_service.column_analysis_classifier
-ner_recognition = lamapi_service.ner_recognizer
-summary_retriever = lamapi_service.summary_retriever
+DESCRIPTION = (Path(__file__).resolve().parent / "data.txt").read_text()
+
+app = FastAPI(title="LamAPI", description=DESCRIPTION, version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+job_queue: Optional[asyncio.Queue[Job]] = None
+workers: List[asyncio.Task] = []
 
 
-def init_services():
-    data_path = Path(__file__).resolve().parent / "data.txt"
-    with data_path.open() as f:
-        description = f.read()
-    app = Flask("LamAPI")
-    CORS(app)
-    # Configure logging
-    logging.basicConfig(level=logging.DEBUG)
-    app.logger.setLevel(logging.DEBUG)
-    api = Api(app, version="1.0", title="LamAPI", description=description)
+def error_response(error_tuple):
+    payload, status = error_tuple
+    return JSONResponse(payload, status_code=status)
 
-    namespaces = {
-        "info": api.namespace("info"),
-        "entity": api.namespace(
-            "entity",
-            description="Services to perform computations and retrieve additional data about entities.",
-        ),
-        "lookup": api.namespace(
-            "lookup",
-            description="Services to perform searches based on an input string.",
-        ),
-        "sti": api.namespace(
-            "sti",
-            description="Services to perform tasks related to Semantic Table Interpretation.",
-        ),
-        "classify": api.namespace(
-            "classify", description="Services to perform string categorisation."
-        ),
-        "summary": api.namespace(
-            "summary",
-            description="Services to get summary statiscs about the datasets.",
-        ),
+
+def extract_json(payload: Dict[str, Any], error_message: str = "Invalid json format"):
+    if not isinstance(payload, dict) or "json" not in payload:
+        return None, error_response(build_error(error_message, 400))
+    return payload["json"], None
+
+
+async def submit_job(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future = loop.create_future()
+    if job_queue is None:
+        raise RuntimeError("Job queue not initialised")
+    job = Job(func=func, args=args, kwargs=kwargs, future=future)
+    await job_queue.put(job)
+    return await future
+
+
+async def worker_loop(worker_id: int) -> None:
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            job = await job_queue.get()
+        except asyncio.CancelledError:
+            break
+
+        try:
+            last_exc: Optional[Exception] = None
+            for attempt in range(max(JOB_RETRIES, 1)):
+                try:
+                    call = partial(job.func, *job.args, **job.kwargs)
+                    result = await loop.run_in_executor(None, call)
+                    if not job.future.done():
+                        job.future.set_result(result)
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt < JOB_RETRIES - 1:
+                        await asyncio.sleep(RETRY_BACKOFF * (attempt + 1))
+                    else:
+                        if not job.future.done():
+                            job.future.set_exception(exc)
+            else:
+                if last_exc and not job.future.done():
+                    job.future.set_exception(last_exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Worker %s execution failure", worker_id)
+            if not job.future.done():
+                job.future.set_exception(exc)
+        finally:
+            job_queue.task_done()
+
+
+@app.on_event("startup")
+async def on_startup() -> None:
+    global job_queue, workers
+    job_queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
+    workers = [
+        asyncio.create_task(worker_loop(i), name=f"lamapi-worker-{i}") for i in range(MAX_WORKERS)
+    ]
+    logger.info("LamAPI FastAPI server started with %s workers", MAX_WORKERS)
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    for worker in workers:
+        worker.cancel()
+    await asyncio.gather(*workers, return_exceptions=True)
+    if job_queue is not None:
+        while not job_queue.empty():
+            job = job_queue.get_nowait()
+            if not job.future.done():
+                job.future.set_exception(RuntimeError("Server shutting down"))
+            job_queue.task_done()
+
+
+info_router = APIRouter(prefix="/info", tags=["info"])
+lookup_router = APIRouter(prefix="/lookup", tags=["lookup"])
+entity_router = APIRouter(prefix="/entity", tags=["entity"])
+classify_router = APIRouter(prefix="/classify", tags=["classify"])
+sti_router = APIRouter(prefix="/sti", tags=["sti"])
+summary_router = APIRouter(prefix="/summary", tags=["summary"])
+
+
+@info_router.get("/")
+async def info() -> Dict[str, Any]:
+    return {
+        "title": "LamAPI",
+        "description": "This is an API which retrieves data about entities in different Knowledge Graphs and performs entity linking task.",
+        "license": {
+            "name": "Apache 2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
+        },
+        "version": "1.0.0",
     }
 
-    return app, api, namespaces
+
+@lookup_router.get("/entity-retrieval")
+async def entity_retrieval(
+    name: str = Query(..., description="Name to look for (e.g., Batman Begins)."),
+    limit: Optional[int] = Query(None, description="Number of entities to retrieve."),
+    token: str = Query(..., description="Private token to access the API."),
+    kind: Optional[str] = Query(None, description="Kind of Named Entity to be matched."),
+    kg: Optional[str] = Query(None, description="Knowledge Graph to query."),
+    fuzzy: Optional[str] = Query(None, description="Enable fuzzy search."),
+    soft_filtering: Optional[str] = Query(
+        None, alias="softFiltering", description="Enable soft filtering."
+    ),
+    types: Optional[List[str]] = Query(None, description="Explicit types to match."),
+    extended_types: Optional[List[str]] = Query(
+        None, alias="extendedTypes", description="Extended types for soft filtering."
+    ),
+    ner_type: Optional[str] = Query(None, alias="nerType", description="NER type to match."),
+    ids: Optional[List[str]] = Query(None, description="Specific IDs to include."),
+    language: Optional[str] = Query(None, description="Language filter."),
+    query: Optional[str] = Query(None, description="Raw Elasticsearch query."),
+    cache: Optional[str] = Query(None, description="Use cached result."),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    fuzzy_valid, fuzzy_value = lamapi_service.validate_bool(fuzzy)
+    if not fuzzy_valid:
+        return error_response(fuzzy_value)
+
+    soft_valid, soft_value = lamapi_service.validate_bool(soft_filtering)
+    if not soft_valid:
+        return error_response(soft_value)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    limit_valid, limit_value = lamapi_service.validate_limit(limit)
+    if not limit_valid:
+        return error_response(limit_value)
+
+    ner_valid, ner_value = lamapi_service.validate_ner_type(ner_type)
+    if not ner_valid:
+        return error_response(ner_value)
+
+    types_values = lamapi_service.parse_multi_values(types)
+    extended_types_values = lamapi_service.parse_multi_values(extended_types)
+    ids_values = lamapi_service.parse_multi_values(ids)
+    ids_value = " ".join(ids_values) if ids_values else None
+    cache_value = cache in (None, "true", "True")
+
+    lookup_kwargs = {
+        "limit": limit_value,
+        "kg": kg_value,
+        "fuzzy": fuzzy_value,
+        "types": types_values or None,
+        "kind": kind,
+        "ner_type": ner_value,
+        "extended_types": extended_types_values or None,
+        "language": language,
+        "ids": ids_value,
+        "query": query,
+        "cache": cache_value,
+        "soft_filtering": soft_value,
+    }
+
+    try:
+        result = await submit_job(lamapi_service.lookup, name, **lookup_kwargs)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Lookup failed")
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
 
 
-app, api, namespaces = init_services()
+@entity_router.post("/types")
+async def entity_types(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
 
-info = namespaces["info"]
-entity = namespaces["entity"]
-lookup = namespaces["lookup"]
-sti = namespaces["sti"]
-classify = namespaces["classify"]
-summary = namespaces["summary"]
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
 
-fields_predicates = info.model(
-    "Predicates",
-    {
-        "json": fields.List(
-            fields.List(fields.String), example=[["Q30", "Q60"], ["Q166262", "Q25191"]]
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.get_types, data, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/objects")
+async def entity_objects(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.get_objects, data, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/bow")
+async def entity_bow(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    wrapper, error = extract_json(payload)
+    if error:
+        return error
+
+    if not isinstance(wrapper, dict):
+        return error_response(build_error("Invalid Data", 400))
+
+    row_text = wrapper.get("text")
+    qids = wrapper.get("qids", [])
+    if row_text is None or not isinstance(qids, list):
+        return error_response(build_error("Invalid Data", 400))
+
+    try:
+        result = await submit_job(lamapi_service.get_bow, row_text, qids, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/predicates")
+async def entity_predicates(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.get_predicates, data, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/labels")
+async def entity_labels(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+    lang: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(
+            lamapi_service.get_labels, data, kg=kg_value, lang=lang, category=category
         )
-    },
-)
-
-fields_objects = info.model(
-    "Objects", {"json": fields.List(fields.String, example=["Q30", "Q166262"])}
-)
-
-# Define the input model with "json" at the root level
-fields_bow = info.model(
-    "Bow",
-    {
-        "json": fields.Nested(
-            info.model(
-                "JsonPayload",
-                {
-                    "text": fields.String(
-                        required=True,
-                        description="Text of the row to process",
-                        example="United States Washington D.C. 331000000 North America",
-                    ),
-                    "qids": fields.List(
-                        fields.String,
-                        required=True,
-                        description="List of candidate QIDs",
-                        example=["Q30", "Q166262"],
-                    ),
-                },
-            )
-        )
-    },
-)
-
-fields_sameas = info.model("SameAS", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
-
-fields_literals = info.model(
-    "Literals", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
-)
-
-fields_types = info.model("Concepts", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
-
-fields_literal_recognizer = info.model(
-    "LiteralRecognizer",
-    {
-        "json": fields.List(
-            fields.String,
-            example=[
-                "50",
-                "12/11/1997",
-                "https://www.unimib.it/",
-                "mario.rossi@gmail.it",
-                "Mount Blanc is located in Aosta Valley",
-            ],
-        )
-    },
-)
-
-fields_labels = info.model("Labels", {"json": fields.List(fields.String, example=["Q30", "Q31"])})
-
-fields_rdf2vec = info.model(
-    "RDF2Vec", {"json": fields.List(fields.String, example=["Q30", "Q31"])}
-)
-
-fields_column_analysis = info.model(
-    "ColumnAnalysis",
-    {
-        "json": fields.List(
-            fields.List(fields.List(fields.String)),
-            example=[
-                # Table 1
-                [
-                    ["10", "100", "1000"],  # Column 1
-                    ["12/11/1997", "26/08/1997", "14/05/2016"],  # Column 2
-                    ["London", "New York", "Paris"],  # Column 3
-                ],
-                # Table 2
-                [
-                    ["Google", "Microsoft", "Apple"],  # Column 1
-                    ["California", "Washington", "California"],  # Column 2
-                    ["1998", "1975", "1976"],  # Column 3
-                ],
-            ],
-        )
-    },
-)
-
-fields_ner = info.model(
-    "NERRecognizer",
-    {
-        "json": fields.List(
-            fields.String,
-            example=[
-                "Albert Einstein was a German Scientist",
-                "Alan Turing was an English Mathematician",
-            ],
-        )
-    },
-)
-
-fields_cells = api.model(
-    "Cells",
-    {"cells": fields.List(fields.String(), required=True, example=["Rome", "Paris", "Praga"])},
-)
-
-
-@info.route("")
-@api.doc(responses={200: "OK"}, description="Infos about this endpoint")
-class Info(Resource):
-    def get(self):
-        info_obj = {
-            "title": "LamAPI",
-            "description": "This is an API which retrieves data about entities in different Knowledge Graphs and performs entity linking task.",
-            "license": {
-                "name": "Apache 2.0",
-                "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
-            },
-            "version": "1.0.0",
-        }
-        return info_obj, 200
-
-
-class BaseEndpoint(Resource):
-    def validate_and_get_json_format(self):
-        try:
-            data = request.get_json()["json"]
-        except:
-            return False, build_error("Invalid json format", 400)
-        return True, data
-
-
-@lookup.route("/entity-retrieval")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    params={
-        "name": "Name to look for (e.g., Batman Begins).",
-        "limit": "The number of entities to be retrieved. The default value is 1000.",
-        "kind": "Kind of Named Entity to be matched. Available values: <code>entity</code>, <code>disambiguation</code>, <code>type</code> and <code>predicate</code>.",
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "fuzzy": "Set this param to True if fuzzy search must be applied. Default is <code>False</code>.",
-        "softFiltering": "Set to True to apply soft filtering (boosting) instead of hard filtering on NER and type constraints. Default is <code>False</code>.",
-        "types": "Types to be matched in the Knowledge Graph as constraint in the retrieval. Provide space-separated IDs or repeat the parameter.",
-        "extendedTypes": "Types derived from transitive closure, used for soft filtering. Provide space-separated IDs or repeat the parameter.",
-        "nerType": "Type of Named Entity to be matched. Available values: <code>LOC</code>, <code>ORG</code>, <code>PERS</code> and <code>OTHERS</code>.",
-        "ids": "Ids of the entity. Provide space-separated IDs or repeat the parameter.",
-        "language": "Language to filter the labels. For example, <code>en</code> for English. Default is <code>None</code>.",
-        "query": "Query to be used to test elastic search. Default is <code>None</code>.",
-        "cache": "Set this param to True if you want to use the cached result of the search. Default is <code>True</code>.",
-        "token": "Private token to access the API.",
-    },
-    description="Given a string as input, the endpoint performs a search in the specified Knowledge Graph.",
-)
-class Lookup(BaseEndpoint):
-    def get(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument("name", type=str, location="args")
-        parser.add_argument("limit", type=int, location="args")
-        parser.add_argument("token", type=str, location="args")
-        parser.add_argument("kind", type=str, location="args")
-        parser.add_argument("nerType", type=str, location="args")
-        parser.add_argument("types", action="append", location="args")
-        parser.add_argument("extendedTypes", action="append", location="args")
-        parser.add_argument("kg", type=str, location="args")
-        parser.add_argument("fuzzy", type=str, location="args")
-        parser.add_argument("softFiltering", type=str, location="args")
-        parser.add_argument("ids", action="append", location="args")
-        parser.add_argument("language", type=str, location="args")
-        parser.add_argument("query", type=str, location="args")
-        parser.add_argument("cache", type=str, location="args")
-        args = parser.parse_args()
-
-        name = args["name"]
-        limit = args["limit"]
-        token = args["token"]
-        kg = args["kg"]
-        fuzzy = args["fuzzy"]
-        soft_filtering = args["softFiltering"]
-        types_raw = args["types"]
-        extended_types_raw = args["extendedTypes"]
-        kind = args["kind"]
-        ner_type = args["nerType"]
-        language = args["language"]
-        ids_raw = args["ids"]
-        query = args["query"]
-        cache = args["cache"]
-
-        cache = cache in ["True", "true", None]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-        if not token_is_valid:
-            return token_error
-
-        is_fuzzy_valid, fuzzy_value = params_validator.validate_bool(fuzzy)
-
-        if not is_fuzzy_valid:
-            return fuzzy_value
-
-        soft_filter_is_valid, soft_filter_value = params_validator.validate_bool(soft_filtering)
-
-        if not soft_filter_is_valid:
-            return soft_filter_value
-
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-        if not kg_is_valid:
-            return kg_error_or_value
-
-        limit_is_valid, limit_error_or_value = params_validator.validate_limit(limit)
-        if not limit_is_valid:
-            return limit_error_or_value
-
-        ner_is_valid, ner_value = params_validator.validate_NERtype(ner_type)
-        if not ner_is_valid:
-            return ner_value
-
-        types_values = params_validator.parse_multi_values(types_raw)
-        extended_types_values = params_validator.parse_multi_values(extended_types_raw)
-        ids_values = params_validator.parse_multi_values(ids_raw)
-
-        if name is None:
-            return build_error("Name is required", 400)
-
-        try:
-            results = lookup_retriever.search(
-                name=name,
-                limit=limit_error_or_value,
-                kg=kg_error_or_value,
-                fuzzy=fuzzy_value,
-                types=types_values or None,
-                kind=kind,
-                ner_type=ner_value,
-                extended_types=extended_types_values or None,
-                language=language,
-                ids=ids_values or None,
-                query=query,
-                cache=cache,
-                soft_filtering=soft_filter_value,
-            )
-        except Exception as e:
-            print("Error", e, flush=True)
-            return build_error(str(e), 400, traceback=traceback.format_exc())
-
-        return results
-
-
-@entity.route("/types")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns the associated TYPES for each entity.",
-    params={
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "token": "Private token to access the APIs.",
-    },
-)
-class Types(BaseEndpoint):
-    @entity.doc(body=fields_types)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return type_retriever.get_types_output(data, kg_error_or_value)
-            else:
-                return build_error("Invalid Data", 400)
-
-
-@entity.route("/objects")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns a list of OBJECTS for each entity.",
-    params={
-        "token": "Private token to access the APIs.",
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-    },
-)
-class Objects(BaseEndpoint):
-    @entity.doc(body=fields_objects)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                try:
-                    result = objects_retriever.get_objects_output(data, kg_error_or_value)
-                    return result
-                except Exception:
-                    print(traceback.format_exc())
-            else:
-                print("objects invalid", data, flush=True)
-                return build_error("Invalid Data", 400, traceback=traceback.format_exc())
-
-
-@entity.route("/bow")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns the BAG OF WORDS (BOW) for each entity.",
-    params={
-        "token": "Private token to access the APIs.",
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-    },
-)
-class Bow(BaseEndpoint):
-    @entity.doc(body=fields_bow)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                try:
-                    row_text = data.get("text")  # Expected row text in the input JSON
-                    qids = data.get("qids", [])  # Expected QIDs list in the input JSON
-                    result = bow_retriever.get_bow_output(row_text, qids, kg=kg_error_or_value)
-                    return result
-                except Exception:
-                    print(traceback.format_exc())
-            else:
-                print("objects invalid", data, flush=True)
-                return build_error("Invalid Data", 400, traceback=traceback.format_exc())
-
-
-@entity.route("/predicates")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns a list of PREDICATES between each pair of entities (SUBJECT and OBJECT).",
-    params={
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "token": "Private token to access the APIs.",
-    },
-)
-class Predicates(BaseEndpoint):
-    @entity.doc(body=fields_predicates)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return predicates_retriever.get_predicates_output(data, kg_error_or_value)
-            else:
-                return build_error("Invalid Data", 400)
-
-
-@entity.route("/labels")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns a list of LABELS and ALIASES for each entity. It's also possible to specify the language to filter the labels.",
-    params={
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "lang": "Language to filter the labels.",
-        "token": "Private token to access the APIs.",
-    },
-)
-class Labels(BaseEndpoint):
-    @entity.doc(body=fields_labels)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        parser.add_argument("lang", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-        lang = args["lang"]
-
-        try:
-            token_is_valid, token_error = params_validator.validate_token(token)
-            kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-            if not token_is_valid:
-                return token_error
-            elif not kg_is_valid:
-                return kg_error_or_value
-            else:
-                is_data_valid, data = super().validate_and_get_json_format()
-                if is_data_valid:
-                    return labels_retriever.get_labels_output(data, kg_error_or_value, lang)
-                else:
-                    return build_error("Invalid Data", 400)
-        except Exception as e:
-            return build_error(f"Error: {str(e)}", 400)
-
-
-@entity.route("/sameas")
-@api.doc(
-    description="Given a JSON array as input composed of Wikidata entities, the endpoint returns the associated entities in Wikipedia.",
-    params={"token": "Private token to access the API."},
-)
-class SameAs(BaseEndpoint):
-    @entity.doc(body=fields_sameas)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-
-        if not token_is_valid:
-            return token_error
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return sameas_retriever.get_sameas_output(data)
-            else:
-                build_error("Invalid Data", 400)
-
-
-@classify.route("/literal-recognizer")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="""
-    Given a JSON array as input composed of a set of strings, the endpoint returns the types of literal. The list of literals recognized is:
-    **DATE**:
-    * '145 bc', '145.bc', '145,bc'
-    * '1997-08-26', '1997.08.26', '1997/08/26'
-    * '26/08/1997', '26.08.1997', '26-08-1997'
-    * '26/08/97', '26.08.97', '26-08-97'
-    * 'august 26 1997', 'august.26.1997', 'august,26,1997'
-    * '26 august 1997', '26.august.1997', '26,august,1997'
-    * '1997 august 26', '1997,august,26', '1997.august.26'
-    * '1997 26 august', '1997,26,august', '1997.26.august'
-    * 'august 1997', 'august.1997', 'august,1997'
-    * '1997 august', '1997.august', '1997,august'
-    * 1997-2022, 1997-present, 1997-now
-    **NUMBERS**:
-    * '2,797,800,564', '2.797.800.564'
-    * '200,797,800', '200.797.800'
-    * 1997, 1345, 26, 1
-    * +/- 34, +/- 34657
-    * 25 thousand, 25 million, 25 billion, 25 trillion
-    * 2 km, 2 km2, 2 cm, 2 cm2, 2 mm, 2 mm2, 10 sq, 10 ft, 10 dm,....
-    * 2,8, 2.8
-    * +/- 5e+/-10
-    **OTHERS**:
-    * https://elearning.unimib.it/
-    * mario.rossi@gmail.com
-    * 12pm
-    * 12.30pm
-    * 12:30pm
-    * 2.30 am
-    """,
-    params={"token": "Private token to access the APIs."},
-)
-class LiteralRecognizer(BaseEndpoint):
-    @classify.doc(body=fields_literal_recognizer)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-
-        if not token_is_valid:
-            return token_error
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return literal_classifier.classifiy_literal(data)
-            else:
-                build_error("Invalid Data", 400)
-
-
-@entity.route("/literals")
-@entity.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input made of Wikipedia entities, the endpoint returns the list of LITERALS classified as DATETIME, NUMBER or STRING for each entity.",
-    params={
-        "kg": "The Knowledge Graph to query. Available values: <code>wikidata</code>. Default is <code>wikidata</code>.",
-        "token": "Private token to access the APIs.",
-    },
-)
-class Literals(BaseEndpoint):
-    @entity.doc(body=fields_literals)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("kg", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        kg = args["kg"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-
-        if not token_is_valid:
-            return token_error
-        elif not kg_is_valid:
-            return kg_error_or_value
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return literals_retriever.get_literals_output(data, kg_error_or_value)
-            else:
-                build_error("Invalid Data", 400)
-
-
-@sti.route("/column-analysis")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of a set of array of strings (cell content), the endpoint calculates, for each array, if the content represents named-entitites or literals.",
-    params={
-        "model_type": "Type of model to use. Values: 'fast' or 'accurate'. Default is 'fast'.",
-        "token": "Private token to access the APIs.",
-    },
-)
-class ColumnAnalysis(BaseEndpoint):
-    @api.doc(body=fields_column_analysis)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        parser.add_argument("model_type", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-        model_type = args["model_type"]
-        if model_type not in ["fast", "accurate"] or model_type is None:
-            model_type = "fast"
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-
-        if not token_is_valid:
-            return token_error
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                result = column_analysis_classifier.classify_columns(data, model_type)
-                return result
-            else:
-                build_error("Invalid Data", 400)
-
-
-@classify.route("/name-entity-recognition")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    description="Given a JSON array as input composed of a set of array of natural language, the endpoint performs the task of Name Entity Recogition and returns the list of mentions found i the text.",
-    params={"token": "Private token to access the APIs."},
-)
-class NERAnalysis(BaseEndpoint):
-    @api.doc(body=fields_ner)
-    def post(self):
-        # get parameters
-        parser = reqparse.RequestParser()
-        parser.add_argument("token", type=str)
-        args = parser.parse_args()
-
-        token = args["token"]
-
-        token_is_valid, token_error = params_validator.validate_token(token)
-
-        if not token_is_valid:
-            return token_error
-        else:
-            is_data_valid, data = super().validate_and_get_json_format()
-            if is_data_valid:
-                return ner_recognition.recognize_entities(data)
-            else:
-                build_error("Invalid Data", 400)
-
-
-@summary.route("/")
-@api.doc(
-    responses={200: "OK", 404: "Not found", 400: "Bad request", 403: "Invalid token"},
-    params={
-        "kg": "The Knowledge Graph to query. Values: 'wikidata'. Default is 'wikidata'.",
-        "data_type": "Type of data to retrieve. Values: 'objects' or 'literals'.",
-        "rank_order": "Order of the results based on rank of predicates. Values: 'desc' or 'asc'.",
-        "k": "Number of elements to return when ordering by rank. Default is 10.",
-        "token": "Private token to access the API.",
-    },
-    description="Returns the summary of the specified Knowledge Graph with optional ordering by rank of predicates.",
-)
-class Summary(BaseEndpoint):
-    def get(self):
-        parser = reqparse.RequestParser()
-        parser.add_argument("kg", type=str, location="args", default="wikidata")
-        parser.add_argument("data_type", type=str, location="args", default="objects")
-        parser.add_argument("rank_order", type=str, location="args")
-        parser.add_argument("k", type=int, location="args")
-        parser.add_argument("token", type=str, location="args")
-        args = parser.parse_args()
-
-        kg = args["kg"]
-        data_type = args["data_type"]
-        rank_order = args["rank_order"]
-        k = args["k"]
-        token = args["token"]
-
-        # Validate token
-        token_is_valid, token_error = params_validator.validate_token(token)
-        if not token_is_valid:
-            return token_error
-
-        # Validate KG
-        kg_is_valid, kg_error_or_value = params_validator.validate_kg(database, kg)
-        if not kg_is_valid:
-            return build_error("Invalid KG. Use 'wikidata'", 400)
-
-        # Validate rank order
-        if rank_order and rank_order not in ["asc", "desc"]:
-            return build_error("Invalid rank order. Use 'asc' or 'desc'.", 400)
-
-        # If k is not provided, use default value
-        k = k if k is not None else 10
-
-        # Implement the logic to retrieve Wikidata summary based on parameters
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/sameas")
+async def entity_sameas(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query("wikidata"),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.get_sameas, data, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@entity_router.post("/literals")
+async def entity_literals(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    kg: Optional[str] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    data, error = extract_json(payload)
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.get_literals, data, kg=kg_value)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@classify_router.post("/literal-recognizer")
+async def literal_recognizer(payload: Dict[str, Any] = Body(...), token: str = Query(...)):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    data, error = extract_json(payload, error_message="Invalid Data")
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.classify_literals, data)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@classify_router.post("/name-entity-recognition")
+async def name_entity_recognition(payload: Dict[str, Any] = Body(...), token: str = Query(...)):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    data, error = extract_json(payload, error_message="Invalid Data")
+    if error:
+        return error
+
+    try:
+        result = await submit_job(lamapi_service.recognize_entities, data)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@sti_router.post("/column-analysis")
+async def column_analysis(
+    payload: Dict[str, Any] = Body(...),
+    token: str = Query(...),
+    model_type: Optional[str] = Query("fast"),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    data, error = extract_json(payload, error_message="Invalid Data")
+    if error:
+        return error
+
+    model = model_type if model_type in {"fast", "accurate"} else "fast"
+
+    try:
+        result = await submit_job(lamapi_service.classify_columns, data, model_type=model)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
+
+
+@summary_router.get("/")
+async def summary(
+    token: str = Query(...),
+    kg: Optional[str] = Query("wikidata"),
+    data_type: str = Query("objects"),
+    rank_order: Optional[str] = Query(None),
+    k: Optional[int] = Query(10),
+    entities: Optional[List[str]] = Query(None),
+):
+    token_valid, token_error = lamapi_service.validate_token(token)
+    if not token_valid:
+        return error_response(token_error)
+
+    kg_valid, kg_value = lamapi_service.validate_kg(kg)
+    if not kg_valid:
+        return error_response(kg_value)
+
+    if rank_order and rank_order not in {"asc", "desc"}:
+        return error_response(build_error("Invalid rank order. Use 'asc' or 'desc'.", 400))
+
+    entities_values = lamapi_service.parse_multi_values(entities)
+    try:
         if data_type == "objects":
-            results = summary_retriever.get_objects_summary(
-                kg=kg_error_or_value, rank_order=rank_order, k=k
+            result = await submit_job(
+                lamapi_service.get_objects_summary,
+                entities_values or None,
+                kg=kg_value,
+                rank_order=rank_order,
+                k=k or 10,
             )
         elif data_type == "literals":
-            results = summary_retriever.get_literals_summary(
-                kg=kg_error_or_value, rank_order=rank_order, k=k
+            result = await submit_job(
+                lamapi_service.get_literals_summary,
+                entities_values or None,
+                kg=kg_value,
+                rank_order=rank_order,
+                k=k or 10,
             )
         else:
-            return build_error("Invalid data type. Use 'objects' or 'literals'.", 400)
+            return error_response(
+                build_error("Invalid data type. Use 'objects' or 'literals'.", 400)
+            )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        return error_response(build_error(str(exc), 500, traceback.format_exc()))
 
-        return results
+
+app.include_router(info_router)
+app.include_router(lookup_router)
+app.include_router(entity_router)
+app.include_router(classify_router)
+app.include_router(sti_router)
+app.include_router(summary_router)

@@ -72,7 +72,7 @@ def _handle_literals_classification(api: LamAPI, args) -> Any:
 
 
 def _handle_columns(api: LamAPI, args) -> Any:
-    return api.classify_columns(args.tables)
+    return api.classify_columns(args.tables, model_type=args.model_type)
 
 
 def _handle_ner(api: LamAPI, args) -> Any:
@@ -151,6 +151,12 @@ def build_parser() -> ArgumentParser:
         "classify-columns", help="Classify table columns (provide as nested lists)"
     )
     col_cmd.add_argument("tables", nargs="+", type=json.loads, help="Tables in JSON list form")
+    col_cmd.add_argument(
+        "--model-type",
+        choices=["fast", "accurate"],
+        default="fast",
+        help="Column classifier model to use",
+    )
     col_cmd.set_defaults(handler=_handle_columns)
 
     ner_cmd = subparsers.add_parser("ner", help="Run Named Entity Recognition on text")

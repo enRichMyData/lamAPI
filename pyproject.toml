@@ -37,6 +37,8 @@ dependencies = [
   "SPARQLWRapper",
   "python-dotenv",
   "column-classifier",
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.29.0",
   "jsonargparse>=4.27.0"
 ]
 
