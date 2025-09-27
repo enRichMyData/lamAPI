@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +12,27 @@ settings = get_settings()
 
 logger = logging.getLogger("lamapi.server")
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await startup_task_queue()
+    queue = get_task_queue()
+    logger.info(
+        "LamAPI FastAPI server started with queue size %s and worker count %s",
+        queue.max_size,
+        queue.worker_count,
+    )
+    try:
+        yield
+    finally:
+        await shutdown_task_queue()
+
+
 app = FastAPI(
-    title=settings.app_name, description=settings.description, version=settings.app_version
+    title=settings.app_name,
+    description=settings.description,
+    version=settings.app_version,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -22,22 +42,5 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    await startup_task_queue()
-    task_queue = get_task_queue()
-    logger.info(
-        "LamAPI FastAPI server started with queue size %s and worker count %s",
-        task_queue.max_size,
-        task_queue.worker_count,
-    )
-
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    await shutdown_task_queue()
-
 
 app.include_router(api_router)

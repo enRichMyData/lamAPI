@@ -7,7 +7,7 @@ lamapi_service = LamAPI()
 
 queue = TaskQueue(
     maxsize=settings.queue_max_size,
-    workers=settings.queue_workers,
+    workers=settings.workers,
     retries=settings.queue_retries,
     backoff=settings.queue_backoff,
 )
