@@ -2,7 +2,7 @@ from typing import Any, Dict, Tuple
 
 from fastapi.responses import JSONResponse
 
-from lamapi.model.utils import build_error
+from lamapi.utils import build_error
 
 
 def error_response(error_tuple: Tuple[Dict[str, Any], int]) -> JSONResponse:

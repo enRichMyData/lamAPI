@@ -1,4 +1,4 @@
-from lamapi.model.utils import build_error, recognize_entity
+from lamapi.utils import build_error, recognize_entity
 
 
 class PredicatesRetriever:

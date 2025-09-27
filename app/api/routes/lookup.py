@@ -7,7 +7,7 @@ from app.api.utils import error_response
 from app.core.task_queue import TaskQueue
 from app.dependencies import get_lamapi, get_task_queue
 from lamapi import LamAPI
-from lamapi.model.utils import build_error
+from lamapi.utils import build_error
 
 router = APIRouter(prefix="/lookup", tags=["lookup"])
 

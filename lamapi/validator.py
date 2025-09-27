@@ -1,6 +1,6 @@
 import os
 
-from lamapi.model.utils import build_error
+from lamapi.utils import build_error
 
 ACCESS_TOKEN = os.environ["LAMAPI_TOKEN"]
 

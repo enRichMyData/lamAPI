@@ -7,7 +7,7 @@ from app.api.utils import error_response, extract_json
 from app.core.task_queue import TaskQueue
 from app.dependencies import get_lamapi, get_task_queue
 from lamapi import LamAPI
-from lamapi.model.utils import build_error
+from lamapi.utils import build_error
 
 router = APIRouter(prefix="/sti", tags=["sti"])
 

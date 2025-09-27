@@ -51,7 +51,7 @@ def word2ngrams(text, n=None):
     return [text[i : i + n] for i in range(len(text) - n + 1)]
 
 
-def get_ngrams(text, n=3):
+def get_ngrams(text, n: int | None = 3):
     ngrams = set()
     for token in text.split(" "):
         temp = word2ngrams(token, n)

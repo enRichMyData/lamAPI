@@ -4,20 +4,20 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from lamapi.model.database import Database
-from lamapi.model.params_validator import ParamsValidator
-from lamapi.model.retrievers.bow_retriever import BOWRetriever
-from lamapi.model.retrievers.column_analysis import ColumnAnalysis
-from lamapi.model.retrievers.labels_retriever import LabelsRetriever
-from lamapi.model.retrievers.literal_classifier import LiteralClassifier
-from lamapi.model.retrievers.literals_retriever import LiteralsRetriever
-from lamapi.model.retrievers.lookup_retriever import LookupRetriever
-from lamapi.model.retrievers.ner_recognizer import NERRecognizer
-from lamapi.model.retrievers.objects_retriever import ObjectsRetriever
-from lamapi.model.retrievers.predicates_retriever import PredicatesRetriever
-from lamapi.model.retrievers.sameas_retriever import SameasRetriever
-from lamapi.model.retrievers.summary_retriever import SummaryRetriever
-from lamapi.model.retrievers.types_retriever import TypesRetriever
+from lamapi.database import Database
+from lamapi.retrievers.bow_retriever import BOWRetriever
+from lamapi.retrievers.column_analysis import ColumnAnalysis
+from lamapi.retrievers.labels_retriever import LabelsRetriever
+from lamapi.retrievers.literal_classifier import LiteralClassifier
+from lamapi.retrievers.literals_retriever import LiteralsRetriever
+from lamapi.retrievers.lookup_retriever import LookupRetriever
+from lamapi.retrievers.ner_recognizer import NERRecognizer
+from lamapi.retrievers.objects_retriever import ObjectsRetriever
+from lamapi.retrievers.predicates_retriever import PredicatesRetriever
+from lamapi.retrievers.sameas_retriever import SameasRetriever
+from lamapi.retrievers.summary_retriever import SummaryRetriever
+from lamapi.retrievers.types_retriever import TypesRetriever
+from lamapi.validator import ParamsValidator
 
 
 class LamAPI:
