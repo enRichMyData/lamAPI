@@ -1,6 +1,10 @@
 """Public entrypoints for the LamAPI core package."""
 
+import os
+
 from dotenv import load_dotenv
+
+os.environ.setdefault("LAMAPI_RUNTIME", "local")
 
 load_dotenv(override=True)
 

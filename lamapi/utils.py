@@ -1,6 +1,14 @@
+import os
 import re
 
 import nltk
+
+
+def _runtime_mode() -> str:
+    runtime = os.environ.get("LAMAPI_RUNTIME", "local").lower()
+    if runtime not in {"local", "docker"}:
+        runtime = "local"
+    return runtime
 
 
 def editdistance(s1, s2):

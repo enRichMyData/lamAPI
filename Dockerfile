@@ -3,6 +3,9 @@ FROM python:3.11
 # Set the working directory
 WORKDIR /app
 
+# Inside the container we resolve endpoints via docker service names
+ENV LAMAPI_RUNTIME=docker
+
 # Copy project metadata and source code needed for installation
 COPY pyproject.toml ./
 COPY lamapi ./lamapi

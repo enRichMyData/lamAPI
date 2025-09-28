@@ -3,28 +3,45 @@ from time import sleep
 
 from elasticsearch import ConnectionError, Elasticsearch
 
-# Extract environment variables
-ELASTIC_ENDPOINT, ELASTIC_PORT = os.environ["ELASTIC_ENDPOINT"].split(":")
+from lamapi.utils import _runtime_mode
+
+_LOCAL_ADDRS = {"localhost", "127.0.0.1", "0.0.0.0"}
+
+
+def _resolve_elastic_host_port():
+    raw_endpoint = os.environ.get("ELASTIC_ENDPOINT", "localhost:9200")
+    if ":" in raw_endpoint:
+        host, port = raw_endpoint.split(":", 1)
+    else:
+        host = raw_endpoint
+        port = os.environ.get("ELASTIC_PORT", "9200")
+
+    runtime = _runtime_mode()
+    host = host.strip()
+    host_lower = host.lower()
+
+    if runtime == "docker":
+        if host_lower in _LOCAL_ADDRS:
+            host = os.environ.get("ELASTIC_SERVICE_HOST", "es01")
+    elif runtime == "local":
+        host = os.environ.get("LOCAL_ELASTIC_SERVICE_HOST", "localhost")
+
+    return host, int(port)
 
 
 class Elastic:
     def __init__(self, timeout=120):
         self._timeout = timeout
+        self._host, self._port = _resolve_elastic_host_port()
         self._elastic = self.connect_to_elasticsearch()
 
     def connect_to_elasticsearch(self, max_retry=5, delay=10):
         retry = 0
         while retry < max_retry:
             try:
-                hosts = [
-                    {
-                        "host": str(ELASTIC_ENDPOINT),
-                        "port": int(ELASTIC_PORT),
-                        "scheme": "http",
-                    }
-                ]
+                host_url = f"http://{self._host}:{self._port}"
                 es = Elasticsearch(
-                    hosts=hosts,
+                    hosts=[host_url],
                     request_timeout=self._timeout,
                     retry_on_timeout=True,
                     max_retries=5,
@@ -51,7 +68,7 @@ class Elastic:
             query_result = self._elastic.search(
                 index=kg,
                 query=body["query"],
-                _source_excludes=body["_source"]["excludes"],
+                source_excludes=body["_source"]["excludes"],
                 size=limit,
             )
             hits = query_result["hits"]["hits"]

@@ -1,109 +1,204 @@
-# Type Domain of Wikidata Entities
+# LamAPI
 
-This repository explains the **type domain** of Wikidata entities as defined in our work. The entity types are categorized into three main groups: **Explicit Entity Types**, **Extended Entity Types**, and **NER Entity Types**. Below is a detailed explanation of each category:
-
----
-
-## Entity Type Categories
-
-### 1. **Explicit Entity Types** (WD Types)
-- These are the **types explicitly associated** with entities in Wikidata.
-- They are **directly linked** to the entity through the Wikidata ontology.
-- Represent **predefined categories** such as:
-  - *Capital city*
-  - *Human*
-  - *Television series*
-- These types are detailed in tables referenced in the original work (e.g., tables showing data with and without filters).
+LamAPI provides semantic access to Wikidata: you can index dumps into MongoDB, compute rich type hierarchies, and expose everything through a REST API or directly from Python. This document covers how to run the service, use the CLI tooling, and build the search index.
 
 ---
 
-### 2. **Extended Entity Types**
-- These types start as **explicit types** in Wikidata but are **extended through deterministic procedures**.
-- **Extension Process**:
-  - Includes operations such as **transitive closure**, which helps uncover indirect relationships or associations.
-  - Example: From the explicit type *Capital city*, additional related types such as *Administrative centre* or *Geographic location* are identified.
-- This category enhances the depth of classification by capturing **indirect associations** that are not directly stated in Wikidata.
+## Architecture at a Glance
 
-#### Algorithm: Extending Entity Types Using Superclass Retrieval with Recursive Relationships
-
-This algorithm describes the process of extending entity types by retrieving their superclasses from a hierarchical ontology, such as Wikidata. It utilizes the **P279 ("subclass of")** property and employs a recursive pattern to traverse the hierarchy and include indirect relationships.
+- **Python library (`lamapi/`)** – core retrieval logic (types, literals, objects, summaries, etc.).
+- **REST API (`lamapi/server.py`)** – Flask application wrapping the library and serving JSON responses.
+- **Data pipeline scripts (`scripts/`)** – tooling for extracting edges, building SQLite closures, parsing Wikidata dumps, and materialising Elasticsearch/MongoDB indices.
+- **Docker assets** – `docker-compose*.yml` files wire MongoDB, Elasticsearch, and the LamAPI service for local development or production.
 
 ---
 
-#### Steps
+## Quick Start
 
-#### 1. **Input Collection**
-- Start with a list of **explicit types** associated with an entity, represented by their unique identifiers (e.g., `Q207784`).
+### Prerequisites
+
+- Docker + Docker Compose (recommended for API usage).
+- Python 3.9+ with `pip` if you plan to run scripts locally.
+- Sufficient disk space (> 300 GB recommended) for dumps, SQLite DB, and MongoDB.
+
+### Option A – Run the REST API via Docker Compose
+
+- API base URL: `http://localhost:5000` (Swagger UI available at root).
+- MongoDB exposed on `localhost:27017`, Elasticsearch on `localhost:9200`.
+- Environment variables can be customised through `.env` or compose overrides.
+
+### Option B – Run the REST API locally
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+python lamapi/server.py
+```
+
+Set the required environment variables first:
+
+```bash
+# Cluster Configuration
+CLUSTER_NAME=lamapi
+LICENSE=basic
+STACK_VERSION=8.8.1
+
+# Elasticsearch Configuration
+ELASTICSEARCH_USERNAME=lamapi
+ELASTIC_PASSWORD=<elastic_username>
+ELASTIC_ENDPOINT=es01:9200
+ELASTIC_FINGERPRINT=
+ELASTIC_PORT=9200
+
+# Kibana Configuration
+KIBANA_PASSWORD=<kibana_password>
+KIBANA_PORT=5601
+
+# MongoDB Configuration
+MONGO_ENDPOINT=mongo:27017
+MONGO_INITDB_ROOT_USERNAME=<mongo_username>
+MONGO_INITDB_ROOT_PASSWORD=<mongo_password>
+MONGO_PORT=27017
+MONGO_VERSION=6.0
+
+
+# Other Configuration
+THREADS=8
+PYTHON_VERSION=3.11
+LAMAPI_TOKEN=<your_token>
+LAMAPI_PORT=5000
+SUPPORTED_KGS=WIKIDATA
+MEM_LIMIT=2G
+
+# Connection Strategy
+# - Set `LAMAPI_RUNTIME=docker` inside containers (Dockerfile already does this).
+# - Leave it unset or `auto` when running locally: LamAPI will rewrite known service
+#   hosts such as `mongo` or `es01` to `localhost` so CLI commands work out of the box.
+# - Override `LAMAPI_LOCAL_MONGO_HOST` / `LAMAPI_LOCAL_ELASTIC_HOST` if your databases
+#   live on a different machine.
+```
 
 ---
 
-#### 2. **Define Query**
-- Construct a query to retrieve all **superclasses** of the given type(s) using the property **P279 ("subclass of")**.
-- Use a **recursive pattern** to traverse the hierarchy and include all parent classes:
-  ```sparql
-  ?entity (wdt:P279)* ?superclass
+## Using LamAPI as a Library
+
+Import the package when you need programmatic access to retrievers:
+
+```python
+from lamapi import Database, TypesRetriever
+
+db = Database()
+retriever = TypesRetriever(db)
+types = retriever.get_types_output(["Q30"], kg="wikidata")
+```
+
+Scripts in `scripts/` provide CLI utilities for data preparation and indexing.
 
 ---
 
-#### 3. **Extend types**
-- Combine the retrieved superclasses with the original explicit types.
-- The final extended types list will be a set of all the lists retrieved associated to the explicit WD types of the entity
+## REST API Overview
 
+LamAPI ships with multiple namespaces (Swagger UI shows schemas and payloads):
 
-### 3. **NER Entity Types** (NER Types)
-- A specialized form of **explicit type extension** that maps Wikidata types to **generic categories** based on a flat classification scheme.
-- Derived from the most common categories in **Named Entity Recognition (NER)** tasks.
-- The four macro-classes used are:
-  1. **ORG** (Organizations)
-  2. **LOC** (Locations)
-  3. **PERS** (Persons)
-  4. **OTHERS** (Entities outside these main categories)
-- **Implementation**:
-  - The mapping methodology is based on the paper **"NECKAr"** by Geiss et al. (2018).
+| Namespace | Endpoint | Method | Description |
+|-----------|----------|--------|-------------|
+| `info`    | `/info/kgs` | GET | List supported knowledge graphs. |
+| `entity`  | `/entity/types` | POST | Retrieve explicit + extended types for entities. |
+| `entity`  | `/entity/objects` | POST | Fetch object neighbours for entities. |
+| `entity`  | `/entity/literals` | POST | Fetch literal attributes. |
+| `entity`  | `/entity/predicates` | POST | Retrieve predicates and relations. |
+| `lookup`  | `/lookup/search` | GET | Free-text entity lookup. |
+| `lookup`  | `/lookup/sameas` | POST | Same-as entity discovery. |
+| `sti`     | `/sti/column-analysis` | POST | Semantic table interpretation helpers. |
+| `sti`     | `/sti/ner` | POST | Named-entity recognition utilities. |
+| `classify`| `/classify/literals` | POST | Literal classifier outputs. |
+| `summary` | `/summary/statistics` | GET | Dataset-level statistics. |
 
-
-#### Algorithm Overview
-
-1. **For each Wikidata (WD) entity**, all associated types are evaluated for extension.
-2. Types are extended if they are present in one of the following lists of macro classes:
-   - **`organization_subclass`**
-   - **`geolocation_subclass`**
-   - **`person`**
-
-Their creation is done as specified in the paper **"NECKAr"**: for each macro class the list with their subclasses and their types "instance of" are included. In the following example the complete list of types "instance of" **capital city** are included into the **`geolocation_subclass`** list:
-![subtype hierarchy](./pictures/ner_hierarchy.png)
-
-3. **Adjustments for `organization_subclass`:**
-   - Certain subclasses are **excluded** from the `organization_subclass` list, such as:
-     - Country
-     - Capitals
-     - Venues
-     - (and others as specified in the processing logic).
-
-4. **Type Classification:**
-   - For each entity, the list of mapped **NER type** among the extended types is selected as the final classification.
-   - Example: If an entity has types that are all present in `geolocation_subclass`, it will be classified as **LOC (Location)**. If the explicit types of an entity belong to different mapped **NER type** the entity will have alist of NER types.
+Confirm contracts via Swagger at `http://localhost:5000` once the API is running.
 
 ---
 
-#### Example
+## Building the Knowledge Graph Index
 
-#### Entity: Belgium (Q31)
-- **Original Types:** Various types associated with Belgium.
-- **Processing:**
-  - The types are checked against the `geolocation_subclass` and `organization_subclass`.
-  - Belgium (Q31) is classified as **LOC (Location)** and **ORG (Organization)**.
+Transform an official Wikidata dump into the artefacts LamAPI expects. Run the steps from the repository root (`emd-lamapi/`).
+
+1. **Download the Wikidata JSON dump**
+   ```bash
+   mkdir -p data/wikidata
+   curl -o data/wikidata/latest-all.json.bz2 \
+     https://dumps.wikimedia.org/wikidatawiki/entities/latest-all.json.bz2
+   ```
+
+2. **Extract type hierarchy edges** using `scripts/extract_type_hierarchy.py` to produce `instance_of.tsv` (P31) and `subclass_of.tsv` (P279).
+   ```bash
+   python3 scripts/extract_type_hierarchy.py \
+     --input data/wikidata/latest-all.json.bz2 \
+     --output-instance data/wikidata/instance_of.tsv \
+     --output-subclass data/wikidata/subclass_of.tsv
+
+   # Stream with pbzip2 for better throughput
+   pbzip2 -dc data/wikidata/latest-all.json.bz2 | \
+     python3 scripts/extract_type_hierarchy.py --stdin-json \
+     --output-instance data/wikidata/instance_of.tsv \
+     --output-subclass data/wikidata/subclass_of.tsv
+   ```
+
+3. **Compute the type transitive closure** with `scripts/infer_types.py`, creating `types.db`.
+   ```bash
+   python3 scripts/infer_types.py \
+     --instance-of data/wikidata/instance_of.tsv \
+     --subclass-of data/wikidata/subclass_of.tsv \
+     --output-db data/wikidata/types.db
+   ```
+   Add `--no-closure` to skip materialising the closure if you only need raw edges.
+
+4. **Parse the Wikidata dump into MongoDB** using the parallel ingestion script.
+   ```bash
+   # Stream with pbzip2 for better throughput
+   pbzip2 -dc data/wikidata/latest-all.json.bz2 | python3 scripts/parse_wikidata_dump_parallel.py \
+     --input data/wikidata/latest-all.json.bz2 \
+     --types-db-path types.db \
+     --threads 16
+   ```
+   Inspect `python3 scripts/parse_wikidata_dump_parallel.py --help` for batching and worker options.
+
+5. **Create Elasticsearch/MongoDB indices** using `scripts/indexing.py` with a configuration under `scripts/index_confs/`.
+   ```bash
+   python3 ./scripts/indexing.py index \
+    --db_name mydb \
+    --collection_name mycoll \
+    --mapping_file ./scripts/mapping.json \
+    --batch-size 8192 \
+    --max-threads 4
+   ```
+   Tweak the JSON config to control retrievers, filters, and indexed fields.
+
+After these steps LamAPI can answer type, lookup, literal, and object queries against the populated databases.
 
 ---
 
+## Useful Scripts & Utilities
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/extract_type_hierarchy.py` | Multi-threaded extractor for P31/P279 edges; supports streaming input. |
+| `scripts/infer_types.py` | Builds a SQLite DB with transitive closure to accelerate type lookups. |
+| `scripts/parse_wikidata_dump_parallel.py` | Ingests Wikidata entities into MongoDB using a threaded pipeline. |
+| `scripts/indexing.py` | Materialises search indices based on JSON configs. |
+| `scripts/experiments.py`, `scripts/summary.py`, etc. | Additional analytics helpers and evaluations. |
+
+Run `python3 <script> --help` for the complete argument list.
+
 ---
 
-## Purpose of This Work
-- To **categorize and expand the understanding** of entity types in Wikidata.
-- To enhance **classification and retrieval processes** by leveraging both direct and extended associations.
+## Troubleshooting & Tips
 
-## References
-- For further information on the NER mapping approach, see: [NECKAr](https://link.springer.com/content/pdf/10.1007/978-3-319-73706-5_10.pdf) by Geiss et al.
+- Prefer streaming the dump through `pbzip2` to keep CPUs saturated while avoiding disk bottlenecks.
+- `extract_type_hierarchy.py` and `infer_types.py` deduplicate edges with `INSERT OR IGNORE`, so re-running them is safe.
+- Store TSVs and SQLite DBs inside a dedicated `data/` directory; they can reach tens of GB.
+- Never commit `.env` files or credentials—`.gitignore` already excludes them.
+- Swagger UI at `http://localhost:5000/docs` is the quickest way to try endpoints once the stack is live.
 
 ---
 

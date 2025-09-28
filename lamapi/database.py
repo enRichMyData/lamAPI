@@ -1,9 +1,14 @@
 import os
 import time
 from datetime import datetime
+from typing import Dict, Optional
 
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError, ServerSelectionTimeoutError
+
+from lamapi.utils import _runtime_mode
+
+_LOCAL_ADDRS = {"localhost", "127.0.0.1", "0.0.0.0"}
 
 
 def _resolve_mongo_host_port():
@@ -14,9 +19,15 @@ def _resolve_mongo_host_port():
         host = raw_endpoint
         port = os.environ.get("MONGO_PORT", "27017")
 
+    runtime = _runtime_mode()
     host = host.strip()
-    if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
-        host = os.environ.get("MONGO_SERVICE_HOST", "mongo")
+    host_lower = host.lower()
+
+    if runtime == "docker":
+        if host_lower in _LOCAL_ADDRS:
+            host = os.environ.get("MONGO_SERVICE_HOST", "mongo")
+    elif runtime == "local":
+        host = os.environ.get("LOCAL_MONGO_SERVICE_HOST", "localhost")
 
     port = int(port)
     return host, port
@@ -34,7 +45,7 @@ MONGO_SERVER_TIMEOUT_MS = int(os.environ.get("MONGO_SERVER_TIMEOUT_MS", "5000"))
 class Database:
     def __init__(self):
         self.mongo = self._connect_with_retry()
-        self.mappings = {kg.lower(): None for kg in SUPPORTED_KGS}
+        self.mappings: Dict[str, Optional[str]] = {kg.lower(): None for kg in SUPPORTED_KGS}
         self.update_mappings()
         self.create_indexes()
 
@@ -62,6 +73,8 @@ class Database:
                     flush=True,
                 )
                 time.sleep(MONGO_RETRY_DELAY)
+        if last_exception is None:
+            raise RuntimeError("Unable to connect to MongoDB")
         raise last_exception
 
     def update_mappings(self):
@@ -199,7 +212,10 @@ class Database:
     def get_requested_collection(self, collection, kg="wikidata"):
         self.update_mappings()
         print(f"KG: {kg}", collection, self.mappings, flush=True)
-        if kg in self.mappings and self.mappings[kg] is not None:
-            return self.mongo[self.mappings[kg]][collection]
+        if kg in self.mappings:
+            db_name = self.mappings[kg]
+            if db_name is not None:
+                return self.mongo[db_name][collection]
         else:
             raise ValueError(f"KG {kg} is not supported.")
+        raise ValueError(f"KG {kg} is not yet available.")

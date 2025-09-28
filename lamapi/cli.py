@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any, Dict, Optional, Sequence
 
 from dotenv import load_dotenv
 from jsonargparse import ActionConfigFile, ArgumentParser
+
+os.environ.setdefault("LAMAPI_RUNTIME", "local")
 
 load_dotenv(override=True)
 
