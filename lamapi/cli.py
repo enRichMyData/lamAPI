@@ -6,7 +6,10 @@ import json
 import sys
 from typing import Any, Dict, Optional, Sequence
 
+from dotenv import load_dotenv
 from jsonargparse import ActionConfigFile, ArgumentParser
+
+load_dotenv(override=True)
 
 from lamapi import LamAPI
 
@@ -89,13 +92,14 @@ def _handle_literals_summary(api: LamAPI, args) -> Any:
     )
 
 
-def build_parser() -> ArgumentParser:
+def build_parser() -> tuple[ArgumentParser, dict[str, Any]]:
     parser = ArgumentParser(prog="lamapi", description="LamAPI command line interface")
     parser.add_argument("--config", action=ActionConfigFile, help="Path to a configuration file")
 
     subparsers = parser.add_subcommands()
+    handlers: dict[str, Any] = {}
 
-    lookup = subparsers.add_parser("lookup", help="Run an entity lookup")
+    lookup = ArgumentParser(prog="lamapi lookup", description="Run an entity lookup")
     lookup.add_argument("--name", required=True, help="Query string")
     lookup.add_argument("--limit", type=int, default=10)
     lookup.add_argument("--kg", default="wikidata")
@@ -108,47 +112,58 @@ def build_parser() -> ArgumentParser:
     lookup.add_argument("--ids", nargs="*", default=None)
     lookup.add_argument("--cache", type=bool, default=True)
     lookup.add_argument("--soft-filtering", type=bool, default=False)
-    lookup.set_defaults(handler=_handle_lookup)
+    subparsers.add_subcommand("lookup", lookup)
+    handlers["lookup"] = _handle_lookup
 
-    types_cmd = subparsers.add_parser("types", help="Retrieve explicit types")
+    types_cmd = ArgumentParser(prog="lamapi types", description="Retrieve explicit types")
     types_cmd.add_argument("entities", nargs="+", help="Entity IDs")
     types_cmd.add_argument("--kg", default="wikidata")
-    types_cmd.set_defaults(handler=_handle_types)
+    subparsers.add_subcommand("types", types_cmd)
+    handlers["types"] = _handle_types
 
-    objects_cmd = subparsers.add_parser("objects", help="Retrieve objects")
+    objects_cmd = ArgumentParser(prog="lamapi objects", description="Retrieve objects")
     objects_cmd.add_argument("entities", nargs="+", help="Entity IDs")
     objects_cmd.add_argument("--kg", default="wikidata")
-    objects_cmd.set_defaults(handler=_handle_objects)
+    subparsers.add_subcommand("objects", objects_cmd)
+    handlers["objects"] = _handle_objects
 
-    literals_cmd = subparsers.add_parser("literals", help="Retrieve literals")
+    literals_cmd = ArgumentParser(prog="lamapi literals", description="Retrieve literals")
     literals_cmd.add_argument("entities", nargs="+", help="Entity IDs")
     literals_cmd.add_argument("--kg", default="wikidata")
-    literals_cmd.set_defaults(handler=_handle_literals)
+    subparsers.add_subcommand("literals", literals_cmd)
+    handlers["literals"] = _handle_literals
 
-    sameas_cmd = subparsers.add_parser("sameas", help="Retrieve sameAs URLs")
+    sameas_cmd = ArgumentParser(prog="lamapi sameas", description="Retrieve sameAs URLs")
     sameas_cmd.add_argument("entities", nargs="+")
     sameas_cmd.add_argument("--kg", default="wikidata")
-    sameas_cmd.set_defaults(handler=_handle_sameas)
+    subparsers.add_subcommand("sameas", sameas_cmd)
+    handlers["sameas"] = _handle_sameas
 
-    labels_cmd = subparsers.add_parser("labels", help="Retrieve labels and aliases")
+    labels_cmd = ArgumentParser(prog="lamapi labels", description="Retrieve labels and aliases")
     labels_cmd.add_argument("entities", nargs="+")
     labels_cmd.add_argument("--kg", default="wikidata")
     labels_cmd.add_argument("--lang")
     labels_cmd.add_argument("--category")
-    labels_cmd.set_defaults(handler=_handle_labels)
+    subparsers.add_subcommand("labels", labels_cmd)
+    handlers["labels"] = _handle_labels
 
-    bow_cmd = subparsers.add_parser("bow", help="Compute Bag-of-Words similarities")
+    bow_cmd = ArgumentParser(prog="lamapi bow", description="Compute Bag-of-Words similarities")
     bow_cmd.add_argument("text", help="Reference text")
     bow_cmd.add_argument("entities", nargs="+", help="Entity IDs")
     bow_cmd.add_argument("--kg", default="wikidata")
-    bow_cmd.set_defaults(handler=_handle_bow)
+    subparsers.add_subcommand("bow", bow_cmd)
+    handlers["bow"] = _handle_bow
 
-    lit_class_cmd = subparsers.add_parser("classify-literals", help="Classify literal strings")
+    lit_class_cmd = ArgumentParser(
+        prog="lamapi classify-literals", description="Classify literal strings"
+    )
     lit_class_cmd.add_argument("literals", nargs="+", help="Literal values")
-    lit_class_cmd.set_defaults(handler=_handle_literals_classification)
+    subparsers.add_subcommand("classify-literals", lit_class_cmd)
+    handlers["classify-literals"] = _handle_literals_classification
 
-    col_cmd = subparsers.add_parser(
-        "classify-columns", help="Classify table columns (provide as nested lists)"
+    col_cmd = ArgumentParser(
+        prog="lamapi classify-columns",
+        description="Classify table columns (provide as nested lists)",
     )
     col_cmd.add_argument("tables", nargs="+", type=json.loads, help="Tables in JSON list form")
     col_cmd.add_argument(
@@ -157,38 +172,52 @@ def build_parser() -> ArgumentParser:
         default="fast",
         help="Column classifier model to use",
     )
-    col_cmd.set_defaults(handler=_handle_columns)
+    subparsers.add_subcommand("classify-columns", col_cmd)
+    handlers["classify-columns"] = _handle_columns
 
-    ner_cmd = subparsers.add_parser("ner", help="Run Named Entity Recognition on text")
+    ner_cmd = ArgumentParser(prog="lamapi ner", description="Run Named Entity Recognition")
     ner_cmd.add_argument("texts", nargs="+", help="Texts to analyse")
-    ner_cmd.set_defaults(handler=_handle_ner)
+    subparsers.add_subcommand("ner", ner_cmd)
+    handlers["ner"] = _handle_ner
 
-    obj_summary_cmd = subparsers.add_parser("objects-summary", help="Objects summary")
+    obj_summary_cmd = ArgumentParser(prog="lamapi objects-summary", description="Objects summary")
     obj_summary_cmd.add_argument("--entities", nargs="*", default=None)
     obj_summary_cmd.add_argument("--kg", default="wikidata")
     obj_summary_cmd.add_argument("--rank-order", choices=["asc", "desc"], default="desc")
     obj_summary_cmd.add_argument("-k", type=int, default=10)
-    obj_summary_cmd.set_defaults(handler=_handle_objects_summary)
+    subparsers.add_subcommand("objects-summary", obj_summary_cmd)
+    handlers["objects-summary"] = _handle_objects_summary
 
-    lit_summary_cmd = subparsers.add_parser("literals-summary", help="Literals summary")
+    lit_summary_cmd = ArgumentParser(
+        prog="lamapi literals-summary", description="Literals summary"
+    )
     lit_summary_cmd.add_argument("--entities", nargs="*", default=None)
     lit_summary_cmd.add_argument("--kg", default="wikidata")
     lit_summary_cmd.add_argument("--rank-order", choices=["asc", "desc"], default="desc")
     lit_summary_cmd.add_argument("-k", type=int, default=10)
-    lit_summary_cmd.set_defaults(handler=_handle_literals_summary)
+    subparsers.add_subcommand("literals-summary", lit_summary_cmd)
+    handlers["literals-summary"] = _handle_literals_summary
 
-    return parser
+    return parser, handlers
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    parser = build_parser()
+    parser, handlers = build_parser()
     args = parser.parse_args(argv)
 
-    if not hasattr(args, "handler"):
-        parser.error("No command provided")
+    command = getattr(args, "subcommand", None)
+    if not command:
+        parser.print_help()
+        parser.exit(2, "\nNo command provided.\n")
+
+    handler = handlers.get(command)
+    if handler is None:
+        parser.error(f"Unknown command '{command}'")
+
+    command_args = args[command]
 
     api = LamAPI()
-    result = args.handler(api, args)
+    result = handler(api, command_args)
     if result is not None:
         _json_dump(result)
 

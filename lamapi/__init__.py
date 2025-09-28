@@ -1,5 +1,9 @@
 """Public entrypoints for the LamAPI core package."""
 
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
 from .core import LamAPI
 from .database import Database
 from .elastic import Elastic
