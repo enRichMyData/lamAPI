@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+import pymongo
+
 from lamapi.database import Database
 from lamapi.recognizers.ner_recognizer import NERRecognizer
 from lamapi.retrievers.bow_retriever import BOWRetriever
@@ -25,6 +27,13 @@ class LamAPI:
 
     def __init__(self, database: Optional[Database] = None) -> None:
         self.database = database or Database()
+        items_c = self.database.get_requested_collection("items")
+        max_popularity = (
+            items_c.find({}, {"popularity": 1})
+            .sort("popularity", pymongo.DESCENDING)
+            .limit(1)
+            .next()["popularity"]
+        )
 
         self.params_validator = ParamsValidator()
         self.types_retriever = TypesRetriever(self.database)
@@ -35,7 +44,7 @@ class LamAPI:
         self.literal_classifier = LiteralClassifier()
         self.literals_retriever = LiteralsRetriever(self.database)
         self.sameas_retriever = SameasRetriever(self.database)
-        self.lookup_retriever = LookupRetriever(self.database)
+        self.lookup_retriever = LookupRetriever(self.database, max_popularity=max_popularity)
         self.column_analysis_classifier = ColumnAnalysis()
         self.ner_recognizer = NERRecognizer()
         self.summary_retriever = SummaryRetriever(self.database)

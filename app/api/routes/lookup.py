@@ -32,6 +32,9 @@ async def entity_retrieval(
     language: Optional[str] = Query(None, description="Language filter."),
     query: Optional[str] = Query(None, description="Raw Elasticsearch query."),
     cache: Optional[str] = Query(None, description="Use cached result."),
+    normalize_score: Optional[str] = Query(
+        None, description="Whether or not normalize the ElasticSearch score."
+    ),
     lamapi_service: LamAPI = Depends(get_lamapi),
     task_queue: TaskQueue = Depends(get_task_queue),
 ):
@@ -59,6 +62,10 @@ async def entity_retrieval(
     if not ner_valid:
         return error_response(ner_value)
 
+    normalize_score_valid, normalize_score_value = lamapi_service.validate_bool(normalize_score)
+    if not normalize_score_valid:
+        return error_response(normalize_score_value)
+
     types_values = lamapi_service.parse_multi_values(types)
     extended_types_values = lamapi_service.parse_multi_values(extended_types)
     ids_values = lamapi_service.parse_multi_values(ids)
@@ -78,6 +85,7 @@ async def entity_retrieval(
         "query": query,
         "cache": cache_value,
         "soft_filtering": soft_value,
+        "normalize_score": normalize_score_value,
     }
 
     try:

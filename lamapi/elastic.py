@@ -30,8 +30,9 @@ def _resolve_elastic_host_port():
 
 
 class Elastic:
-    def __init__(self, timeout=120):
+    def __init__(self, timeout=120, max_popularity: int | None = None):
         self._timeout = timeout
+        self.max_popularity = max_popularity
         self._host, self._port = _resolve_elastic_host_port()
         self._elastic = self.connect_to_elasticsearch()
 
@@ -60,7 +61,7 @@ class Elastic:
             sleep(delay)
         raise Exception("Failed to connect to Elasticsearch after multiple attempts")
 
-    def search(self, body, kg="wikidata", limit=1000):
+    def search(self, body, kg="wikidata", limit=1000, normalize_score=True):
         try:
             if "_source" not in body:
                 body["_source"] = {"excludes": ["language"]}
@@ -85,9 +86,17 @@ class Elastic:
                     "name": hit["_source"]["name"],
                     "description": hit["_source"]["description"],
                     "types": hit["_source"]["types"],
-                    "popularity": hit["_source"]["popularity"],
-                    "pos_score": round((i + 1) / len(hits), 3),
-                    "es_score": round(hit["_score"] / max_score, 3),
+                    "popularity": (
+                        hit["_source"]["popularity"]
+                        if normalize_score
+                        else (
+                            hit["_source"]["popularity"] * self.max_popularity
+                            if self.max_popularity is not None
+                            else hit["_source"]["popularity"]
+                        )
+                    ),
+                    "pos_score": (i + 1) / len(hits),
+                    "es_score": hit["_score"] / max_score if normalize_score else hit["_score"],
                     "ntoken_entity": hit["_source"]["ntoken"],
                     "length_entity": hit["_source"]["length"],
                 }

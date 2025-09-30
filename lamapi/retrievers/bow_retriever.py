@@ -135,7 +135,7 @@ class BOWRetriever:
             intersection = row_tokens.intersection(candidate_bow_set)
             similarity = len(intersection) / row_token_count if row_token_count > 0 else 0
             result[qid] = {
-                "similarity_score": round(similarity, 2),
+                "similarity_score": similarity,
                 "matched_words": list(intersection),
             }
 
