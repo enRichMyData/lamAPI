@@ -13,7 +13,6 @@ class NERRecognizer:
 
             ner = []
             for ent in doc.ents:
-                print(ent.text, ent.start_char, ent.end_char, ent.label_)
                 ner.append(
                     {
                         "mention": ent.text,
@@ -22,7 +21,6 @@ class NERRecognizer:
                         "end_index": ent.end_char,
                     }
                 )
-
             final_response[f"{index}"] = {"text": text, "ner": ner}
 
         return final_response

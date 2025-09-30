@@ -36,8 +36,15 @@ dependencies = [
   "pandas",
   "SPARQLWRapper",
   "python-dotenv",
-  "column-classifier"
+  "column-classifier",
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.29.0",
+  "jsonargparse>=4.27.0",
+  "pydantic-settings>=2.0.3"
 ]
+
+[project.scripts]
+lamapi = "lamapi.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -54,7 +61,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["api*"]
+include = ["lamapi*", "app*"]
 
 [tool.ruff]
 line-length = 99

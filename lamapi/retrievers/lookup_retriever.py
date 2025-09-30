@@ -1,14 +1,14 @@
 import datetime
 import json
 
-from model.elastic import Elastic
-from model.utils import clean_str, compute_similarity_between_string, editdistance
+from lamapi.elastic import Elastic
+from lamapi.utils import clean_str, compute_similarity_between_string, editdistance
 
 
 class LookupRetriever:
-    def __init__(self, database):
+    def __init__(self, database, max_popularity: int | None = None):
         self.database = database
-        self.elastic_retriever = Elastic()
+        self.elastic_retriever = Elastic(max_popularity=max_popularity)
 
     def search(
         self,
@@ -25,6 +25,7 @@ class LookupRetriever:
         query=None,
         cache=True,
         soft_filtering=False,
+        normalize_score=True,
     ):
         self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
         cleaned_name = clean_str(name)
@@ -42,6 +43,7 @@ class LookupRetriever:
             query=query,
             cache=cache,
             soft_filtering=soft_filtering,
+            normalize_score=normalize_score,
         )
         return query_result
 
@@ -60,6 +62,7 @@ class LookupRetriever:
         query,
         cache=True,
         soft_filtering=False,
+        normalize_score=True,
     ):
         self.candidate_cache_collection = self.database.get_requested_collection("cache", kg=kg)
 
@@ -83,7 +86,9 @@ class LookupRetriever:
 
         if query is not None:
             query = json.loads(query)
-            result = self.elastic_retriever.search(query, kg, limit)
+            result = self.elastic_retriever.search(
+                query, kg, limit, normalize_score=normalize_score
+            )
             result = self._get_final_candidates_list(
                 result,
                 cleaned_name,
@@ -106,7 +111,9 @@ class LookupRetriever:
                 language=language,
                 soft_filtering=soft_filtering,
             )
-            result = self.elastic_retriever.search(query, kg, limit)
+            result = self.elastic_retriever.search(
+                query, kg, limit, normalize_score=normalize_score
+            )
             final_result = self._get_final_candidates_list(
                 result,
                 cleaned_name,
@@ -125,6 +132,7 @@ class LookupRetriever:
                 ambiguity_mention,
                 corrects_tokens,
                 final_result,
+                normalize_score,
             )
             return final_result
 
@@ -159,6 +167,7 @@ class LookupRetriever:
                 ambiguity_mention,
                 corrects_tokens,
                 final_result,
+                normalize_score,
             )
             if result is not None:
                 final_result = result
@@ -177,7 +186,7 @@ class LookupRetriever:
         )
         final_result = []
 
-        result = self.elastic_retriever.search(query, kg, limit)
+        result = self.elastic_retriever.search(query, kg, limit, normalize_score=normalize_score)
         final_result = self._get_final_candidates_list(
             result,
             cleaned_name,
@@ -196,14 +205,17 @@ class LookupRetriever:
             ambiguity_mention,
             corrects_tokens,
             final_result,
+            normalize_score=normalize_score,
         )
         self.add_or_update_cache(body, final_result, limit)
 
         return final_result
 
-    def _get_ambiguity_mention(self, cleaned_name, kg, limit=1000):
+    def _get_ambiguity_mention(self, cleaned_name, kg, limit=1000, normalize_score=True):
         query_token = self.create_token_query(name=cleaned_name)
-        result_to_discard = self.elastic_retriever.search(query_token, kg, limit)
+        result_to_discard = self.elastic_retriever.search(
+            query_token, kg, limit, normalize_score=normalize_score
+        )
         ambiguity_mention, corrects_tokens = (0, 0)
         history_labels, tokens_set = (set(), set())
         for entity in result_to_discard:
@@ -218,10 +230,7 @@ class LookupRetriever:
         ambiguity_mention = (
             ambiguity_mention / len(history_labels) if len(history_labels) > 0 else 0
         )
-        ambiguity_mention = round(ambiguity_mention, 3)
-        corrects_tokens = round(
-            len(tokens_mention.intersection(tokens_set)) / len(tokens_mention), 3
-        )
+        corrects_tokens = len(tokens_mention.intersection(tokens_set)) / len(tokens_mention)
         return ambiguity_mention, corrects_tokens
 
     def _get_final_candidates_list(
@@ -263,9 +272,9 @@ class LookupRetriever:
         for entity, entity_types_tokens in zip(result, normalised_entity_types):
             id_entity = entity["id"]
             label_clean = clean_str(entity["name"])
-            ed_score = round(editdistance(label_clean, name), 2)
-            jaccard_score = round(compute_similarity_between_string(label_clean, name), 2)
-            jaccard_ngram_score = round(compute_similarity_between_string(label_clean, name, 3), 2)
+            ed_score = editdistance(label_clean, name)
+            jaccard_score = compute_similarity_between_string(label_clean, name)
+            jaccard_ngram_score = compute_similarity_between_string(label_clean, name, 3)
             obj = {
                 "id": entity["id"],
                 "name": entity["name"],
@@ -346,6 +355,7 @@ class LookupRetriever:
         ambiguity_mention,
         corrects_tokens,
         result,
+        normalize_score,
     ):
         if ids is None:
             return result
@@ -363,7 +373,9 @@ class LookupRetriever:
         fetched_candidates = []
         for entity_id in ids_list:
             query = self.create_ids_query(entity_id)
-            fetched = self.elastic_retriever.search(query, kg, limit=1)
+            fetched = self.elastic_retriever.search(
+                query, kg, limit=1, normalize_score=normalize_score
+            )
             if fetched:
                 fetched_candidates.extend(fetched)
 
