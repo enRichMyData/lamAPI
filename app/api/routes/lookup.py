@@ -33,7 +33,9 @@ async def entity_retrieval(
     query: Optional[str] = Query(None, description="Raw Elasticsearch query."),
     cache: Optional[str] = Query(None, description="Use cached result."),
     normalize_score: Optional[str] = Query(
-        None, description="Whether or not normalize the ElasticSearch score."
+        None,
+        alias="normalizeScore",
+        description="Whether or not normalize the ElasticSearch score.",
     ),
     lamapi_service: LamAPI = Depends(get_lamapi),
     task_queue: TaskQueue = Depends(get_task_queue),
